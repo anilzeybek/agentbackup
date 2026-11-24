@@ -165,6 +165,18 @@ impl HarnessAdapter for ClaudeCodeAdapter {
                         }
                     }
                 }
+                "ai-title" | "custom-title" => {
+                    recognized_events += 1;
+                    if let Some(t) = val
+                        .get("customTitle")
+                        .or_else(|| val.get("aiTitle"))
+                        .and_then(|v| v.as_str())
+                        .map(str::trim)
+                        .filter(|s| !s.is_empty())
+                    {
+                        summary_title = Some(t.to_string());
+                    }
+                }
                 "user" => {
                     recognized_events += 1;
                     last_assistant_msg_id = None;
@@ -234,7 +246,16 @@ impl HarnessAdapter for ClaudeCodeAdapter {
                         });
                     }
                 }
-                "system" | "progress" | "file-history-snapshot" | "queue-operation" => {
+                "system"
+                | "progress"
+                | "file-history-snapshot"
+                | "queue-operation"
+                | "agent-name"
+                | "last-prompt"
+                | "pr-link"
+                | "tag"
+                | "attachment"
+                | "permission-mode" => {
                     recognized_events += 1;
                 }
                 _ => {}

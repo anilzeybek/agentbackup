@@ -410,8 +410,6 @@ pub fn format_status_report(
     use std::fmt::Write as _;
 
     let mut out = String::new();
-    writeln!(out, "agentbackup status")?;
-    writeln!(out, "{}", "=".repeat(50))?;
 
     if !config_path.exists() {
         writeln!(
