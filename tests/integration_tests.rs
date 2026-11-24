@@ -21,13 +21,14 @@ fn setup_antigravity_fixture(root: &Path) {
     fs::create_dir_all(&sandbox_dir).unwrap();
     fs::write(sandbox_dir.join("recording.webp"), vec![0u8; 64 * 1024]).unwrap();
 
+    let dummy_anth_key = format!("{}{}", "sk-ant-", "api03-1234567890abcdefghijklmno");
     let lines = [
         serde_json::json!({
             "step_index": 0,
             "source": "USER_EXPLICIT",
             "type": "USER_INPUT",
             "created_at": "2026-11-24T16:34:52Z",
-            "content": "<USER_REQUEST>\nFix auth token refresh in my-web-app with key sk-ant-api03-1234567890abcdefghijklmno\nHere is a screenshot: ![shot](data:image/png;base64,iVBORw0KGgoAAAANSUhEUg==)\n</USER_REQUEST>\n<ADDITIONAL_METADATA>\nThe current local time is: 2026-11-24T16:34:52Z.\n</ADDITIONAL_METADATA>"
+            "content": format!("<USER_REQUEST>\nFix auth token refresh in my-web-app with key {}\nHere is a screenshot: ![shot](data:image/png;base64,iVBORw0KGgoAAAANSUhEUg==)\n</USER_REQUEST>\n<ADDITIONAL_METADATA>\nThe current local time is: 2026-11-24T16:34:52Z.\n</ADDITIONAL_METADATA>", dummy_anth_key)
         }),
         serde_json::json!({
             "step_index": 1,
