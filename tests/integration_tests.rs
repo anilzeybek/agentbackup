@@ -503,8 +503,8 @@ fn scan_and_per_chat_markdown_backup_with_metadata_incremental_and_retention() {
     assert!(backup_dir.join("INDEX.md").is_file());
 
     // Verify Antigravity + Claude Code markdown metadata, sanitization, exact timestamps, and multi-model headings
-    let ag_dir = backup_dir.join("antigravity");
-    let cc_dir = backup_dir.join("claude-code");
+    let ag_dir = backup_dir.join("antigravity").join("my-web-app");
+    let cc_dir = backup_dir.join("claude-code").join("my-web-app");
     let ag_entry = fs::read_dir(&ag_dir).unwrap().flatten().next().unwrap();
     let cc_entry = fs::read_dir(&cc_dir).unwrap().flatten().next().unwrap();
     let ag_md = fs::read_to_string(ag_entry.path()).unwrap();
@@ -543,13 +543,9 @@ fn scan_and_per_chat_markdown_backup_with_metadata_incremental_and_retention() {
     assert!(!cc_md.contains("SIDECHAIN_NOISE"));
 
     // Verify OpenCode SQLite markdown metadata
-    let oc_dir = backup_dir.join("opencode");
-    let oc_md = fs::read_dir(&oc_dir)
-        .unwrap()
-        .flatten()
-        .map(|e| fs::read_to_string(e.path()).unwrap())
-        .find(|content| content.contains("opencode:ses_sqlite_01"))
-        .unwrap();
+    let oc_dir = backup_dir.join("opencode").join("opencode-demo");
+    let oc_entry = fs::read_dir(&oc_dir).unwrap().flatten().next().unwrap();
+    let oc_md = fs::read_to_string(oc_entry.path()).unwrap();
     assert!(oc_md.contains("harness_version: \"1.2.8\""));
     assert!(oc_md.contains("workspace: \"/Users/tester/workdir/opencode-demo\""));
     assert!(oc_md.contains("models:\n  - claude-opus-4-5\n"));
@@ -645,7 +641,7 @@ fn txt_and_json_formats_include_full_metadata_and_preserve_deleted_sessions() {
     assert!(json_dir.join("index.json").is_file());
 
     // Verify JSON per-chat exports for Codex (both plain .jsonl and .jsonl.zst)
-    let codex_json_dir = json_dir.join("codex");
+    let codex_json_dir = json_dir.join("codex").join("cli-tools");
     let mut codex_convs = Vec::new();
     for entry in fs::read_dir(&codex_json_dir).unwrap().flatten() {
         let raw = fs::read_to_string(entry.path()).unwrap();
@@ -688,8 +684,8 @@ fn txt_and_json_formats_include_full_metadata_and_preserve_deleted_sessions() {
         .any(|c| c["models"] == serde_json::json!(["gpt-5-codex"]) && c["message_count"] == 2));
 
     // Verify TXT per-chat headers and INDEX.txt
-    let txt_ag_dir = txt_dir.join("antigravity");
-    let txt_cc_dir = txt_dir.join("claude-code");
+    let txt_ag_dir = txt_dir.join("antigravity").join("my-web-app");
+    let txt_cc_dir = txt_dir.join("claude-code").join("my-web-app");
     let ag_txt = fs::read_to_string(
         fs::read_dir(&txt_ag_dir)
             .unwrap()

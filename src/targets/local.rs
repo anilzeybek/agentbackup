@@ -111,7 +111,7 @@ impl BackupTarget for LocalTarget {
                 }
             }
 
-            let expected_prefix = format!("{}/", conv.harness.as_str());
+            let expected_prefix = format!("{}/{}/", conv.harness.as_str(), conv.project);
             let rel_path = match &existing {
                 Some(rec)
                     if rec.rel_path.starts_with(&expected_prefix)
