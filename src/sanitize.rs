@@ -254,10 +254,223 @@ pub fn sanitize_project_name(input: &str) -> String {
     }
 }
 
-/// Extract a project directory name from a filesystem path string if it looks like a workspace path.
+pub const WORKSPACE_CONTAINERS: &[&str] = &[
+    "workdir",
+    "projects",
+    "project",
+    "code",
+    "dev",
+    "repos",
+    "repo",
+    "src",
+    "workspace",
+    "workspaces",
+    "git",
+    "github",
+    "work",
+    "Documents",
+    "Desktop",
+];
+
+pub const NON_PROJECT_HOME_DIRS: &[&str] = &[
+    "Library",
+    "Applications",
+    "Downloads",
+    "Movies",
+    "Music",
+    "Pictures",
+    "Public",
+];
+
+const SYSTEM_PREFIXES: &[&str] = &[
+    "/System",
+    "/Library",
+    "/Applications",
+    "/usr",
+    "/etc",
+    "/opt",
+    "/dev",
+    "/proc",
+    "/sys",
+    "/bin",
+    "/sbin",
+];
+
+const TEMP_PREFIXES: &[&str] = &["/tmp", "/private/tmp", "/var", "/private/var"];
+
+fn path_has_prefix(path: &str, prefix: &str) -> bool {
+    path == prefix
+        || path
+            .strip_prefix(prefix)
+            .map(|rest| rest.starts_with('/'))
+            .unwrap_or(false)
+}
+
+/// Resolve the Git repository name (handling both normal `.git/` repos and `.git` worktree files)
+/// by walking upward from `path` without crossing `~`, temp roots, or `/`.
+pub fn git_repo_name_for_path(path: &std::path::Path) -> Option<String> {
+    let mut cur = if path.is_file() {
+        path.parent()?
+    } else if path.is_dir() {
+        path
+    } else {
+        return None;
+    };
+
+    let home = dirs::home_dir();
+
+    loop {
+        // Stop before crossing home directory, system roots, or `/`
+        if cur.parent().is_none() {
+            break;
+        }
+        if let Some(ref h) = home {
+            if cur == h.as_path() {
+                break;
+            }
+        }
+        let cur_str = cur.to_string_lossy();
+        if cur_str == "/Users"
+            || cur_str == "/home"
+            || cur_str == "/tmp"
+            || cur_str == "/private/tmp"
+            || cur_str == "/var"
+            || cur_str == "/private/var"
+        {
+            break;
+        }
+        // Also stop at `/Users/<user>` or `/home/<user>` even if different from current user
+        let parts: Vec<&str> = cur_str.split('/').filter(|s| !s.is_empty()).collect();
+        if parts.len() == 2 && (parts[0] == "Users" || parts[0] == "home") {
+            break;
+        }
+
+        let dot_git = cur.join(".git");
+        if dot_git.is_dir() {
+            let name = cur.file_name()?.to_str()?;
+            let sanitized = sanitize_project_name(name);
+            return if sanitized == "general" {
+                None
+            } else {
+                Some(sanitized)
+            };
+        }
+        if dot_git.is_file() {
+            if let Ok(content) = std::fs::read_to_string(&dot_git) {
+                if let Some(gitdir_line) = content
+                    .lines()
+                    .find_map(|l| l.trim().strip_prefix("gitdir:"))
+                {
+                    let raw_gitdir = gitdir_line.trim();
+                    let gitdir_path = if std::path::Path::new(raw_gitdir).is_absolute() {
+                        std::path::PathBuf::from(raw_gitdir)
+                    } else {
+                        cur.join(raw_gitdir)
+                    };
+                    // Worktree pointer: `<repo>/.git/worktrees/<name>` -> `<repo>`
+                    let components: Vec<&std::ffi::OsStr> =
+                        gitdir_path.iter().collect();
+                    if let Some(git_idx) = components.iter().position(|c| *c == ".git") {
+                        if git_idx > 0 {
+                            let repo_name = components[git_idx - 1].to_string_lossy();
+                            let sanitized = sanitize_project_name(&repo_name);
+                            if sanitized != "general" {
+                                return Some(sanitized);
+                            }
+                        }
+                    }
+                }
+            }
+            // Fallback for submodule `.git` file: use directory containing `.git`
+            let name = cur.file_name()?.to_str()?;
+            let sanitized = sanitize_project_name(name);
+            return if sanitized == "general" {
+                None
+            } else {
+                Some(sanitized)
+            };
+        }
+
+        cur = cur.parent()?;
+    }
+
+    None
+}
+
+/// Extract a normalized project name from a filesystem path string.
+/// - Non-project paths (`~`, `/`, `/tmp`, `/var`, `~/Library`, `~/Desktop`, `~/workdir`, `~/.claude`, etc.) return `None` (caller uses `"general"`).
+/// - Nested paths inside a Git repository or Git worktree resolve to the Git repo root name.
+/// - Deleted/non-existent paths under known workspace containers (`~/workdir/<project>/sub/dir`) resolve to `<project>`.
 pub fn project_name_from_path(path_str: &str) -> Option<String> {
-    let p = std::path::Path::new(path_str.trim());
-    let name = p.file_name()?.to_str()?;
+    let trimmed = path_str.trim().trim_end_matches('/');
+    if trimmed.is_empty() || trimmed == "/" || trimmed == "~" {
+        return None;
+    }
+
+    // Reject OS system directories immediately
+    for prefix in SYSTEM_PREFIXES {
+        if path_has_prefix(trimmed, prefix) {
+            return None;
+        }
+    }
+
+    let parts: Vec<&str> = trimmed.split('/').filter(|s| !s.is_empty()).collect();
+    if parts.is_empty() {
+        return None;
+    }
+
+    // Inspect home-relative structure (`/Users/<user>/...` or `/home/<user>/...`)
+    let is_home_path = parts.len() >= 2 && (parts[0] == "Users" || parts[0] == "home");
+    if is_home_path {
+        // Home directory itself (`~`) -> general
+        if parts.len() == 2 {
+            return None;
+        }
+        let dir1 = parts[2];
+        // Hidden dot-dirs (`.claude`, `.gemini`, `.codex`, `.config`, ...) or non-project home dirs -> general
+        if dir1.starts_with('.') || NON_PROJECT_HOME_DIRS.contains(&dir1) {
+            return None;
+        }
+        // Container dir itself (`~/workdir`, `~/Desktop`, `~/Documents`, ...) -> general
+        if parts.len() == 3 && WORKSPACE_CONTAINERS.contains(&dir1) {
+            return None;
+        }
+    }
+
+    let path = std::path::Path::new(trimmed);
+
+    // If path exists on disk, prefer Git repo / worktree root name
+    if path.exists() {
+        if let Some(repo) = git_repo_name_for_path(path) {
+            return Some(repo);
+        }
+    }
+
+    // Temp directories without a Git repo -> general
+    for prefix in TEMP_PREFIXES {
+        if path_has_prefix(trimmed, prefix) {
+            return None;
+        }
+    }
+
+    // Fallback for non-Git or deleted paths under a workspace container (`~/workdir/<project>/sub/dir`)
+    if is_home_path && WORKSPACE_CONTAINERS.contains(&parts[2]) && parts.len() >= 4 {
+        let proj = parts[3];
+        if proj.starts_with('.') {
+            return None;
+        }
+        let sanitized = sanitize_project_name(proj);
+        return if sanitized == "general" {
+            None
+        } else {
+            Some(sanitized)
+        };
+    }
+
+    let name = path.file_name()?.to_str()?;
+    if name.starts_with('.') {
+        return None;
+    }
     let sanitized = sanitize_project_name(name);
     if sanitized == "general" {
         None
@@ -305,5 +518,70 @@ mod tests {
         let input = "before\n-----BEGIN RSA PRIVATE KEY-----\nMIIEowIBAAKCAQEA\n-----END RSA PRIVATE KEY-----\nafter";
         let out = redact_secrets(input);
         assert_eq!(out, "before\n[REDACTED:PRIVATE_KEY]\nafter");
+    }
+
+    #[test]
+    fn maps_non_project_dirs_to_none_general() {
+        assert_eq!(project_name_from_path("/"), None);
+        assert_eq!(project_name_from_path("~"), None);
+        assert_eq!(project_name_from_path("/Users/anilzeybek"), None);
+        assert_eq!(project_name_from_path("/Users/anilzeybek/"), None);
+        assert_eq!(project_name_from_path("/Users/anilzeybek/workdir"), None);
+        assert_eq!(project_name_from_path("/Users/anilzeybek/Desktop"), None);
+        assert_eq!(project_name_from_path("/Users/anilzeybek/Downloads/foo"), None);
+        assert_eq!(
+            project_name_from_path(
+                "/Users/anilzeybek/Library/Application Support/Claude/2026-11-07-ephemeral"
+            ),
+            None
+        );
+        assert_eq!(project_name_from_path("/Users/anilzeybek/.claude/projects"), None);
+        assert_eq!(project_name_from_path("/tmp"), None);
+        assert_eq!(project_name_from_path("/tmp/scratch-session"), None);
+        assert_eq!(project_name_from_path("/private/tmp/scratch-session"), None);
+    }
+
+    #[test]
+    fn resolves_nested_paths_via_git_repo_worktree_and_container_fallback() {
+        let tmp = tempfile::TempDir::new().unwrap();
+
+        // 1. Normal Git repo with nested subdirectory
+        let repo_root = tmp.path().join("my-rust-repo");
+        let nested = repo_root.join("crates").join("core").join("src");
+        std::fs::create_dir_all(repo_root.join(".git")).unwrap();
+        std::fs::create_dir_all(&nested).unwrap();
+        assert_eq!(
+            project_name_from_path(nested.to_str().unwrap()),
+            Some("my-rust-repo".to_string())
+        );
+
+        // 2. Git worktree pointing back to main repo
+        let wt_dir = tmp.path().join("ephemeral-wt-abc123");
+        let wt_sub = wt_dir.join("frontend");
+        std::fs::create_dir_all(&wt_sub).unwrap();
+        let main_gitdir = repo_root
+            .join(".git")
+            .join("worktrees")
+            .join("ephemeral-wt-abc123");
+        std::fs::write(
+            wt_dir.join(".git"),
+            format!("gitdir: {}\n", main_gitdir.display()),
+        )
+        .unwrap();
+        assert_eq!(
+            project_name_from_path(wt_sub.to_str().unwrap()),
+            Some("my-rust-repo".to_string())
+        );
+
+        // 3. Non-Git temp dir maps to None (general)
+        let plain_tmp = tmp.path().join("just-a-scratch-dir");
+        std::fs::create_dir_all(&plain_tmp).unwrap();
+        assert_eq!(project_name_from_path(plain_tmp.to_str().unwrap()), None);
+
+        // 4. Non-existent nested path under container resolves to top-level project
+        assert_eq!(
+            project_name_from_path("/Users/tester/workdir/web-app/packages/ui/src"),
+            Some("web-app".to_string())
+        );
     }
 }

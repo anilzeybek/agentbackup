@@ -9,7 +9,9 @@ use crate::adapters::{file_mtime_and_size, HarnessAdapter};
 use crate::models::{
     parse_rfc3339, push_unique_model, Conversation, DiscoveredSource, Harness, Message, Role,
 };
-use crate::sanitize::{project_name_from_path, sanitize_project_name};
+use crate::sanitize::{
+    project_name_from_path, sanitize_project_name, NON_PROJECT_HOME_DIRS, WORKSPACE_CONTAINERS,
+};
 
 pub struct ClaudeCodeAdapter;
 
@@ -346,26 +348,33 @@ fn decode_claude_encoded_dir(encoded: &str) -> Option<String> {
     if segments.is_empty() {
         return None;
     }
-    let known_parents = [
-        "workdir",
-        "projects",
-        "project",
-        "code",
-        "dev",
-        "repos",
-        "src",
-        "workspace",
-        "workspaces",
-        "Documents",
-        "Desktop",
-    ];
-    for (idx, seg) in segments.iter().enumerate() {
-        if known_parents.contains(seg) && idx + 1 < segments.len() {
-            return Some(sanitize_project_name(&segments[idx + 1..].join("-")));
-        }
+
+    // Temp / system roots -> general
+    if matches!(
+        segments[0],
+        "tmp" | "private" | "var" | "etc" | "usr" | "opt" | "System" | "Library" | "Applications"
+    ) {
+        return None;
     }
-    if (segments[0] == "Users" || segments[0] == "home") && segments.len() >= 3 {
+
+    if segments[0] == "Users" || segments[0] == "home" {
+        // Home dir itself (`-Users-<user>`) -> general
+        if segments.len() <= 2 {
+            return None;
+        }
+        let dir1 = segments[2];
+        if NON_PROJECT_HOME_DIRS.contains(&dir1) {
+            return None;
+        }
+        if WORKSPACE_CONTAINERS.contains(&dir1) {
+            // Container dir itself (`-Users-<user>-workdir`) -> general
+            if segments.len() == 3 {
+                return None;
+            }
+            return Some(sanitize_project_name(&segments[3..].join("-")));
+        }
         return Some(sanitize_project_name(&segments[2..].join("-")));
     }
+
     Some(sanitize_project_name(trimmed))
 }

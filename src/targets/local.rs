@@ -111,8 +111,12 @@ impl BackupTarget for LocalTarget {
                 }
             }
 
+            let expected_prefix = format!("{}/", conv.harness.as_str());
             let rel_path = match &existing {
-                Some(rec) if rec.rel_path.ends_with(&format!(".{}", expected_ext)) => {
+                Some(rec)
+                    if rec.rel_path.starts_with(&expected_prefix)
+                        && rec.rel_path.ends_with(&format!(".{}", expected_ext)) =>
+                {
                     rec.rel_path.clone()
                 }
                 _ => relative_path_for(conv, format),

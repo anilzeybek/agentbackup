@@ -503,17 +503,12 @@ fn scan_and_per_chat_markdown_backup_with_metadata_incremental_and_retention() {
     assert!(backup_dir.join("INDEX.md").is_file());
 
     // Verify Antigravity + Claude Code markdown metadata, sanitization, exact timestamps, and multi-model headings
-    let web_app_dir = backup_dir.join("my-web-app");
-    let mut ag_md = String::new();
-    let mut cc_md = String::new();
-    for entry in fs::read_dir(&web_app_dir).unwrap().flatten() {
-        let name = entry.file_name().to_string_lossy().to_string();
-        if name.contains("_antigravity_") {
-            ag_md = fs::read_to_string(entry.path()).unwrap();
-        } else if name.contains("_claude-code_") {
-            cc_md = fs::read_to_string(entry.path()).unwrap();
-        }
-    }
+    let ag_dir = backup_dir.join("antigravity");
+    let cc_dir = backup_dir.join("claude-code");
+    let ag_entry = fs::read_dir(&ag_dir).unwrap().flatten().next().unwrap();
+    let cc_entry = fs::read_dir(&cc_dir).unwrap().flatten().next().unwrap();
+    let ag_md = fs::read_to_string(ag_entry.path()).unwrap();
+    let cc_md = fs::read_to_string(cc_entry.path()).unwrap();
 
     // Antigravity: multi-model, exact timestamps with seconds, workspace inferred, omitted None fields
     assert!(ag_md.contains("workspace: \"/Users/tester/workdir/my-web-app\""));
@@ -548,9 +543,13 @@ fn scan_and_per_chat_markdown_backup_with_metadata_incremental_and_retention() {
     assert!(!cc_md.contains("SIDECHAIN_NOISE"));
 
     // Verify OpenCode SQLite markdown metadata
-    let oc_dir = backup_dir.join("opencode-demo");
-    let oc_entry = fs::read_dir(&oc_dir).unwrap().flatten().next().unwrap();
-    let oc_md = fs::read_to_string(oc_entry.path()).unwrap();
+    let oc_dir = backup_dir.join("opencode");
+    let oc_md = fs::read_dir(&oc_dir)
+        .unwrap()
+        .flatten()
+        .map(|e| fs::read_to_string(e.path()).unwrap())
+        .find(|content| content.contains("opencode:ses_sqlite_01"))
+        .unwrap();
     assert!(oc_md.contains("harness_version: \"1.2.8\""));
     assert!(oc_md.contains("workspace: \"/Users/tester/workdir/opencode-demo\""));
     assert!(oc_md.contains("models:\n  - claude-opus-4-5\n"));
@@ -575,10 +574,10 @@ fn scan_and_per_chat_markdown_backup_with_metadata_incremental_and_retention() {
     fs::remove_dir_all(cc_root).unwrap();
     let after_delete = run_backup(&cfg, &state_path, false).unwrap();
     assert_eq!(after_delete[0].stats.total_tracked, 6);
-    let still_has_cc = fs::read_dir(&web_app_dir)
+    let still_has_cc = fs::read_dir(&cc_dir)
         .unwrap()
         .flatten()
-        .any(|e| e.file_name().to_string_lossy().contains("_claude-code_"));
+        .any(|e| e.file_name().to_string_lossy().ends_with(".md"));
     assert!(still_has_cc, "Backed-up Claude Code file must be retained");
     let index_after = fs::read_to_string(backup_dir.join("INDEX.md")).unwrap();
     assert!(index_after.contains("Add Stripe webhook handler"));
@@ -646,9 +645,9 @@ fn txt_and_json_formats_include_full_metadata_and_preserve_deleted_sessions() {
     assert!(json_dir.join("index.json").is_file());
 
     // Verify JSON per-chat exports for Codex (both plain .jsonl and .jsonl.zst)
-    let cli_json_dir = json_dir.join("cli-tools");
+    let codex_json_dir = json_dir.join("codex");
     let mut codex_convs = Vec::new();
-    for entry in fs::read_dir(&cli_json_dir).unwrap().flatten() {
+    for entry in fs::read_dir(&codex_json_dir).unwrap().flatten() {
         let raw = fs::read_to_string(entry.path()).unwrap();
         let val: serde_json::Value = serde_json::from_str(&raw).unwrap();
         codex_convs.push(val);
@@ -689,17 +688,26 @@ fn txt_and_json_formats_include_full_metadata_and_preserve_deleted_sessions() {
         .any(|c| c["models"] == serde_json::json!(["gpt-5-codex"]) && c["message_count"] == 2));
 
     // Verify TXT per-chat headers and INDEX.txt
-    let txt_web_dir = txt_dir.join("my-web-app");
-    let mut ag_txt = String::new();
-    let mut cc_txt = String::new();
-    for entry in fs::read_dir(&txt_web_dir).unwrap().flatten() {
-        let name = entry.file_name().to_string_lossy().to_string();
-        if name.contains("_antigravity_") {
-            ag_txt = fs::read_to_string(entry.path()).unwrap();
-        } else if name.contains("_claude-code_") {
-            cc_txt = fs::read_to_string(entry.path()).unwrap();
-        }
-    }
+    let txt_ag_dir = txt_dir.join("antigravity");
+    let txt_cc_dir = txt_dir.join("claude-code");
+    let ag_txt = fs::read_to_string(
+        fs::read_dir(&txt_ag_dir)
+            .unwrap()
+            .flatten()
+            .next()
+            .unwrap()
+            .path(),
+    )
+    .unwrap();
+    let cc_txt = fs::read_to_string(
+        fs::read_dir(&txt_cc_dir)
+            .unwrap()
+            .flatten()
+            .next()
+            .unwrap()
+            .path(),
+    )
+    .unwrap();
     assert!(cc_txt.contains("Git Branch: feat/stripe-webhooks\n"));
     assert!(cc_txt.contains("Harness Version: 2.0.31\n"));
     assert!(ag_txt.contains("Models: gemini-4-neon-high, gemini-4-pro\n"));
@@ -737,10 +745,10 @@ fn txt_and_json_formats_include_full_metadata_and_preserve_deleted_sessions() {
     assert_eq!(after[0].stats.updated_count, 1);
     assert_eq!(after[0].stats.total_tracked, 6);
 
-    let still_has_cc_txt = fs::read_dir(&txt_web_dir)
+    let still_has_cc_txt = fs::read_dir(&txt_cc_dir)
         .unwrap()
         .flatten()
-        .any(|e| e.file_name().to_string_lossy().contains("_claude-code_"));
+        .any(|e| e.file_name().to_string_lossy().ends_with(".txt"));
     assert!(still_has_cc_txt);
 }
 

@@ -14,7 +14,9 @@ use walkdir::WalkDir;
 
 use crate::config::{default_harness_path_string, expand_tilde};
 use crate::models::{Conversation, DiscoveredSource, Harness};
-use crate::sanitize::sanitize_project_name;
+use crate::sanitize::{
+    project_name_from_path, NON_PROJECT_HOME_DIRS, WORKSPACE_CONTAINERS,
+};
 
 pub trait HarnessAdapter: Send + Sync {
     fn harness(&self) -> Harness;
@@ -83,35 +85,7 @@ fn re_abs_path() -> &'static Regex {
     })
 }
 
-const WORKSPACE_PARENTS: &[&str] = &[
-    "workdir",
-    "projects",
-    "project",
-    "code",
-    "dev",
-    "repos",
-    "repo",
-    "src",
-    "workspace",
-    "workspaces",
-    "git",
-    "github",
-    "work",
-    "Documents",
-    "Desktop",
-];
-
-const IGNORED_HOME_DIRS: &[&str] = &[
-    "Library",
-    "Applications",
-    "Downloads",
-    "Movies",
-    "Music",
-    "Pictures",
-    "Public",
-];
-
-/// Infer the most likely `(project_name, project_path)` from absolute file paths encountered in a transcript.
+/// Infer the most likely `(project_name, workspace_path)` from absolute file paths encountered in a transcript.
 pub fn infer_project_from_text_chunks(texts: &[String]) -> Option<(String, String)> {
     let mut counts: HashMap<(String, String), usize> = HashMap::new();
 
@@ -122,36 +96,25 @@ pub fn infer_project_from_text_chunks(texts: &[String]) -> Option<(String, Strin
             });
             let parts: Vec<&str> = raw_path.split('/').filter(|s| !s.is_empty()).collect();
             // Expected: ["Users" | "home", username, dir1, (dir2), ...]
-            if parts.len() < 3 {
+            if parts.len() < 4 {
                 continue;
             }
             let dir1 = parts[2];
-            if dir1.starts_with('.') || IGNORED_HOME_DIRS.contains(&dir1) {
+            if dir1.starts_with('.') || NON_PROJECT_HOME_DIRS.contains(&dir1) {
                 continue;
             }
 
-            let (proj_name, proj_path) =
-                if WORKSPACE_PARENTS.contains(&dir1) && parts.len() >= 4 {
-                    let dir2 = parts[3];
-                    if dir2.starts_with('.') {
-                        continue;
-                    }
-                    (
-                        sanitize_project_name(dir2),
-                        format!("/{}/{}/{}/{}", parts[0], parts[1], dir1, dir2),
-                    )
-                } else if !WORKSPACE_PARENTS.contains(&dir1) {
-                    (
-                        sanitize_project_name(dir1),
-                        format!("/{}/{}/{}", parts[0], parts[1], dir1),
-                    )
-                } else {
-                    continue;
-                };
+            let Some(proj_name) = project_name_from_path(raw_path) else {
+                continue;
+            };
 
-            if proj_name != "general" {
-                *counts.entry((proj_name, proj_path)).or_insert(0) += 1;
-            }
+            let workspace_path = if WORKSPACE_CONTAINERS.contains(&dir1) {
+                format!("/{}/{}/{}/{}", parts[0], parts[1], dir1, parts[3])
+            } else {
+                format!("/{}/{}/{}", parts[0], parts[1], dir1)
+            };
+
+            *counts.entry((proj_name, workspace_path)).or_insert(0) += 1;
         }
     }
 

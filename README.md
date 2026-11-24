@@ -64,7 +64,7 @@ path = "/path/to/your/existing/backup-folder"
 format = "markdown" # markdown | txt | json
 ```
 
-Each conversation is written to `<project>/<YYYY-MM-DD>_<harness>_<slug>_<shortid>.<ext>` alongside a top-level `INDEX` file.
+Each conversation is written under its harness folder as `<harness>/<YYYY-MM-DD>_<slug>_<shortid>.<ext>` (`antigravity/`, `claude-code/`, `codex/`, `opencode/`) alongside a top-level `INDEX` file.
 
 ### Guarantees
 - **Strict target path check:** If a target `path` does not exist on disk, `agentbackup` exits with an error instead of creating it (preventing silent writes into unmounted sync folders).

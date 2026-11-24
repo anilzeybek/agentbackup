@@ -12,10 +12,9 @@ pub fn relative_path_for(conv: &Conversation, format: OutputFormat) -> String {
     let date = conv.date_prefix();
     let slug = slugify(&conv.title, 48);
     format!(
-        "{}/{}_{}_{}_{}.{}",
-        conv.project,
-        date,
+        "{}/{}_{}_{}.{}",
         conv.harness.as_str(),
+        date,
         slug,
         conv.short_id,
         ext
