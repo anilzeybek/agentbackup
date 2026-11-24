@@ -524,18 +524,18 @@ mod tests {
     fn maps_non_project_dirs_to_none_general() {
         assert_eq!(project_name_from_path("/"), None);
         assert_eq!(project_name_from_path("~"), None);
-        assert_eq!(project_name_from_path("/Users/anilzeybek"), None);
-        assert_eq!(project_name_from_path("/Users/anilzeybek/"), None);
-        assert_eq!(project_name_from_path("/Users/anilzeybek/workdir"), None);
-        assert_eq!(project_name_from_path("/Users/anilzeybek/Desktop"), None);
-        assert_eq!(project_name_from_path("/Users/anilzeybek/Downloads/foo"), None);
+        assert_eq!(project_name_from_path("/Users/tester"), None);
+        assert_eq!(project_name_from_path("/Users/tester/"), None);
+        assert_eq!(project_name_from_path("/Users/tester/workdir"), None);
+        assert_eq!(project_name_from_path("/Users/tester/Desktop"), None);
+        assert_eq!(project_name_from_path("/Users/tester/Downloads/foo"), None);
         assert_eq!(
             project_name_from_path(
-                "/Users/anilzeybek/Library/Application Support/Claude/2026-11-07-ephemeral"
+                "/Users/tester/Library/Application Support/Claude/2026-11-07-ephemeral"
             ),
             None
         );
-        assert_eq!(project_name_from_path("/Users/anilzeybek/.claude/projects"), None);
+        assert_eq!(project_name_from_path("/Users/tester/.claude/projects"), None);
         assert_eq!(project_name_from_path("/tmp"), None);
         assert_eq!(project_name_from_path("/tmp/scratch-session"), None);
         assert_eq!(project_name_from_path("/private/tmp/scratch-session"), None);
