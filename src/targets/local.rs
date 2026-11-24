@@ -82,7 +82,6 @@ impl BackupTarget for LocalTarget {
         fast_skipped: usize,
         state: &mut TargetState,
         dry_run: bool,
-        force: bool,
     ) -> Result<SyncStats> {
         self.validate()?;
 
@@ -98,19 +97,17 @@ impl BackupTarget for LocalTarget {
             let conv = item.conversation;
             let existing = state.conversations.get(&conv.id).cloned();
 
-            if !force {
-                if let Some(ref rec) = existing {
-                    let target_exists = self.root.join(&rec.rel_path).is_file();
-                    if target_exists && rec.content_sha256 == item.content_sha256 {
-                        stats.skipped_count += 1;
-                        if !dry_run {
-                            if let Some(entry) = state.conversations.get_mut(&conv.id) {
-                                entry.source_mtime = item.source_mtime;
-                                entry.source_size = item.source_size;
-                            }
+            if let Some(ref rec) = existing {
+                let target_exists = self.root.join(&rec.rel_path).is_file();
+                if target_exists && rec.content_sha256 == item.content_sha256 {
+                    stats.skipped_count += 1;
+                    if !dry_run {
+                        if let Some(entry) = state.conversations.get_mut(&conv.id) {
+                            entry.source_mtime = item.source_mtime;
+                            entry.source_size = item.source_size;
                         }
-                        continue;
                     }
+                    continue;
                 }
             }
 
@@ -157,7 +154,7 @@ impl BackupTarget for LocalTarget {
         let index_exists = self.root.join(index_filename).is_file();
         let changed = stats.new_count > 0 || stats.updated_count > 0;
 
-        if changed || force || !index_exists {
+        if changed || !index_exists {
             let records: Vec<&ConversationRecord> = state.conversations.values().collect();
             let index_content = render_index(&records, format)?;
             let bytes = self.write_file(index_filename, &index_content, dry_run)?;

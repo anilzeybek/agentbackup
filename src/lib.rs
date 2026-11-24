@@ -99,7 +99,6 @@ pub fn run_backup(
     cfg: &Config,
     state_path: &Path,
     dry_run: bool,
-    force: bool,
 ) -> Result<Vec<TargetRunReport>> {
     if cfg.targets.is_empty() {
         bail!("No backup targets configured. Run `agentbackup init` first.");
@@ -125,13 +124,13 @@ pub fn run_backup(
         }
     }
 
-    // Fast-path incremental filter: if `!force`, skip parsing any source whose
+    // Fast-path incremental filter: skip parsing any source whose
     // `(source_mtime, source_size)` is unchanged across ALL targets and whose output file exists.
     let mut to_parse: Vec<&DiscoveredSource> = Vec::new();
     let mut fast_skipped_per_target: Vec<usize> = vec![0; cfg.targets.len()];
 
     for src in &discovered {
-        let mut all_targets_can_skip = !force && src.source_mtime > 0;
+        let mut all_targets_can_skip = src.source_mtime > 0;
         let mut target_skips = vec![false; cfg.targets.len()];
 
         if all_targets_can_skip {
@@ -202,7 +201,7 @@ pub fn run_backup(
         .zip(fast_skipped_per_target.into_iter())
     {
         let tstate = state.target_mut(target.name());
-        let stats = target.sync(&items, fast_skipped, tstate, dry_run, force)?;
+        let stats = target.sync(&items, fast_skipped, tstate, dry_run)?;
         reports.push(TargetRunReport {
             name: tcfg.name.clone(),
             path: tcfg.path.clone(),

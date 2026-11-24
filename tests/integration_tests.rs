@@ -460,7 +460,7 @@ fn build_fixture_harnesses(base: &Path) -> HarnessesConfig {
 }
 
 #[test]
-fn scan_and_per_chat_markdown_backup_with_metadata_incremental_force_and_retention() {
+fn scan_and_per_chat_markdown_backup_with_metadata_incremental_and_retention() {
     let tmp = TempDir::new().unwrap();
     let harnesses = build_fixture_harnesses(tmp.path());
     let backup_dir = tmp.path().join("backups");
@@ -490,13 +490,13 @@ fn scan_and_per_chat_markdown_backup_with_metadata_incremental_force_and_retenti
     assert!(ag_summary.est_export_bytes < 2_500);
 
     // 2. Dry-run previews 6 new conversations without creating files or state
-    let dry_reports = run_backup(&cfg, &state_path, true, false).unwrap();
+    let dry_reports = run_backup(&cfg, &state_path, true).unwrap();
     assert_eq!(dry_reports[0].stats.new_count, 6);
     assert!(!state_path.exists());
     assert!(!backup_dir.join("INDEX.md").exists());
 
     // 3. First real run writes 6 conversation files + INDEX.md
-    let reports = run_backup(&cfg, &state_path, false, false).unwrap();
+    let reports = run_backup(&cfg, &state_path, false).unwrap();
     assert_eq!(reports[0].stats.new_count, 6);
     assert_eq!(reports[0].stats.updated_count, 0);
     assert_eq!(reports[0].stats.skipped_count, 0);
@@ -565,20 +565,15 @@ fn scan_and_per_chat_markdown_backup_with_metadata_incremental_force_and_retenti
     assert!(index_md.contains("claude-opus-4-5"));
 
     // 4. Second run with no changes skips all 6 conversations
-    let second = run_backup(&cfg, &state_path, false, false).unwrap();
+    let second = run_backup(&cfg, &state_path, false).unwrap();
     assert_eq!(second[0].stats.new_count, 0);
     assert_eq!(second[0].stats.updated_count, 0);
     assert_eq!(second[0].stats.skipped_count, 6);
 
-    // 5. --force re-exports all 6 conversations even though unchanged
-    let forced = run_backup(&cfg, &state_path, false, true).unwrap();
-    assert_eq!(forced[0].stats.updated_count, 6);
-    assert_eq!(forced[0].stats.skipped_count, 0);
-
-    // 6. Never-delete guarantee: delete Claude Code local source, re-run, verify backup file & INDEX retain it
+    // 5. Never-delete guarantee: delete Claude Code local source, re-run, verify backup file & INDEX retain it
     let cc_root = Path::new(harnesses.claude_code.as_ref().unwrap());
     fs::remove_dir_all(cc_root).unwrap();
-    let after_delete = run_backup(&cfg, &state_path, false, false).unwrap();
+    let after_delete = run_backup(&cfg, &state_path, false).unwrap();
     assert_eq!(after_delete[0].stats.total_tracked, 6);
     let still_has_cc = fs::read_dir(&web_app_dir)
         .unwrap()
@@ -607,7 +602,7 @@ fn missing_target_directory_returns_clear_error_without_creating_it() {
         }],
     };
 
-    let err = run_backup(&cfg, &state_path, false, false).unwrap_err();
+    let err = run_backup(&cfg, &state_path, false).unwrap_err();
     assert!(err.to_string().contains("does not exist"));
     assert!(
         !missing_dir.exists(),
@@ -645,7 +640,7 @@ fn txt_and_json_formats_include_full_metadata_and_preserve_deleted_sessions() {
         ],
     };
 
-    let reports = run_backup(&cfg, &state_path, false, false).unwrap();
+    let reports = run_backup(&cfg, &state_path, false).unwrap();
     assert_eq!(reports.len(), 2);
     assert!(txt_dir.join("INDEX.txt").is_file());
     assert!(json_dir.join("index.json").is_file());
@@ -738,7 +733,7 @@ fn txt_and_json_formats_include_full_metadata_and_preserve_deleted_sessions() {
     )
     .unwrap();
 
-    let after = run_backup(&cfg, &state_path, false, false).unwrap();
+    let after = run_backup(&cfg, &state_path, false).unwrap();
     assert_eq!(after[0].stats.updated_count, 1);
     assert_eq!(after[0].stats.total_tracked, 6);
 

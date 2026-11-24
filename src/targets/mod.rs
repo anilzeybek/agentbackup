@@ -34,7 +34,6 @@ pub trait BackupTarget {
         fast_skipped: usize,
         state: &mut TargetState,
         dry_run: bool,
-        force: bool,
     ) -> Result<SyncStats>;
 }
 

@@ -24,10 +24,6 @@ pub enum Commands {
         /// Preview what would be written without modifying target files or state
         #[arg(long)]
         dry_run: bool,
-
-        /// Re-export all conversations even if unchanged
-        #[arg(long)]
-        force: bool,
     },
 
     /// Manage optional macOS launchd background backup schedule

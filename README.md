@@ -37,7 +37,6 @@ agentbackup scan
 # 3. Run an incremental backup
 agentbackup run
 agentbackup run --dry-run   # preview without modifying files or state
-agentbackup run --force     # re-export all conversations even if unchanged
 
 # 4. Optional: install a macOS launchd background schedule
 agentbackup schedule install --every 1h

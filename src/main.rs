@@ -70,7 +70,7 @@ fn main() -> Result<()> {
             );
         }
 
-        Commands::Run { dry_run, force } => {
+        Commands::Run { dry_run } => {
             if !config_path.exists() {
                 bail!(
                     "Config file not found at {}. Run `agentbackup init` first.",
@@ -78,7 +78,7 @@ fn main() -> Result<()> {
                 );
             }
             let cfg = Config::load_from(&config_path)?;
-            let reports = run_backup(&cfg, &state_path, dry_run, force)?;
+            let reports = run_backup(&cfg, &state_path, dry_run)?;
 
             if dry_run {
                 println!("[dry-run] No files or state were modified.\n");
