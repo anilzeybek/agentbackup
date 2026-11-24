@@ -15,8 +15,7 @@ use std::path::Path;
 
 use crate::adapters::{adapter_for, all_adapters};
 use crate::config::{
-    contract_tilde, detect_harnesses, expand_tilde, Config, OutputFormat, OutputLayout,
-    TargetConfig, TargetType,
+    contract_tilde, detect_harnesses, expand_tilde, Config, OutputFormat, TargetConfig, TargetType,
 };
 use crate::models::{Conversation, DiscoveredSource, Harness};
 use crate::render::render_single;
@@ -39,7 +38,6 @@ pub struct TargetRunReport {
     pub name: String,
     pub path: String,
     pub format: OutputFormat,
-    pub layout: OutputLayout,
     pub stats: SyncStats,
 }
 
@@ -209,7 +207,6 @@ pub fn run_backup(
             name: tcfg.name.clone(),
             path: tcfg.path.clone(),
             format: tcfg.format,
-            layout: tcfg.layout,
             stats,
         });
     }
@@ -298,34 +295,11 @@ pub fn init_config_interactive<R: BufRead, W: Write>(
         )?;
     };
 
-    // 3. Prompt for layout
-    let layout = loop {
-        write!(
-            writer,
-            "File layout [per-chat/monthly/per-project] (default: per-chat): "
-        )?;
-        writer.flush()?;
-        let mut line = String::new();
-        let n = reader.read_line(&mut line)?;
-        if n == 0 || line.trim().is_empty() {
-            break OutputLayout::PerChat;
-        }
-        if let Some(l) = OutputLayout::from_str_loose(&line) {
-            break l;
-        }
-        writeln!(
-            writer,
-            "Invalid layout '{}'. Choose per-chat, monthly, or per-project.",
-            line.trim()
-        )?;
-    };
-
     cfg.targets = vec![TargetConfig {
         name: "local".to_string(),
         target_type: TargetType::Local,
         path: target_path,
         format,
-        layout,
     }];
 
     cfg.save_to(config_path)?;

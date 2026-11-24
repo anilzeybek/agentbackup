@@ -86,8 +86,8 @@ fn main() -> Result<()> {
 
             for report in reports {
                 println!(
-                    "Target '{}' ({}, {}, {}):",
-                    report.name, report.format, report.layout, report.path
+                    "Target '{}' ({}, {}):",
+                    report.name, report.format, report.path
                 );
                 println!(
                     "  new: {}, updated: {}, skipped: {}, tracked: {} (wrote {} files, {})",

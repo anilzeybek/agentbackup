@@ -28,7 +28,7 @@ cargo install --path .
 ## Quick Start
 
 ```bash
-# 1. Detect installed harnesses and configure your local backup directory, format, and layout
+# 1. Detect installed harnesses and configure your local backup directory and format
 agentbackup init
 
 # 2. Inspect detected sessions and raw disk size vs estimated export size (read-only)
@@ -63,10 +63,11 @@ name = "local"
 type = "local"
 path = "/path/to/your/existing/backup-folder"
 format = "markdown" # markdown | txt | json
-layout = "per-chat" # per-chat | monthly | per-project
 ```
+
+Each conversation is written to `<project>/<YYYY-MM-DD>_<harness>_<slug>_<shortid>.<ext>` alongside a top-level `INDEX` file.
 
 ### Guarantees
 - **Strict target path check:** If a target `path` does not exist on disk, `agentbackup` exits with an error instead of creating it (preventing silent writes into unmounted sync folders).
-- **Never-delete retention:** If a harness prunes old local sessions (such as Claude Code's 30-day default cleanup), previously backed-up conversations remain preserved across all layouts (`per-chat`, `monthly`, `per-project`) and in the top-level `INDEX`.
+- **Never-delete retention:** If a harness prunes old local sessions (such as Claude Code's 30-day default cleanup), previously backed-up conversations remain preserved along with their entries in the top-level `INDEX`.
 - **Blob & secret hygiene:** Tool calls, tool outputs, thinking traces, screenshots, and base64 payloads are excluded/replaced with lightweight placeholders, and common API keys/tokens/PEM keys are redacted by default.

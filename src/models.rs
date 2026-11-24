@@ -116,13 +116,6 @@ impl Conversation {
             .unwrap_or_else(|| "undated".to_string())
     }
 
-    pub fn month_prefix(&self) -> String {
-        self.created_at
-            .or(self.updated_at)
-            .map(|dt| dt.format("%Y-%m").to_string())
-            .unwrap_or_else(|| "undated".to_string())
-    }
-
     /// Recompute `message_count` and deduplicated `models` list in order of appearance.
     pub fn refresh_derived_fields(&mut self) {
         self.message_count = self.messages.len();

@@ -60,36 +60,6 @@ impl fmt::Display for OutputFormat {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
-#[serde(rename_all = "kebab-case")]
-pub enum OutputLayout {
-    #[default]
-    PerChat,
-    Monthly,
-    PerProject,
-}
-
-impl OutputLayout {
-    pub fn from_str_loose(s: &str) -> Option<Self> {
-        match s.trim().to_lowercase().as_str() {
-            "per-chat" | "per_chat" | "chat" => Some(OutputLayout::PerChat),
-            "monthly" | "month" => Some(OutputLayout::Monthly),
-            "per-project" | "per_project" | "project" => Some(OutputLayout::PerProject),
-            _ => None,
-        }
-    }
-}
-
-impl fmt::Display for OutputLayout {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            OutputLayout::PerChat => f.write_str("per-chat"),
-            OutputLayout::Monthly => f.write_str("monthly"),
-            OutputLayout::PerProject => f.write_str("per-project"),
-        }
-    }
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HarnessesConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -146,8 +116,6 @@ pub struct TargetConfig {
     pub path: String,
     #[serde(default)]
     pub format: OutputFormat,
-    #[serde(default)]
-    pub layout: OutputLayout,
 }
 
 impl TargetConfig {

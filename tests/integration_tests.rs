@@ -1,6 +1,4 @@
-use agentbackup::config::{
-    Config, HarnessesConfig, OutputFormat, OutputLayout, TargetConfig, TargetType,
-};
+use agentbackup::config::{Config, HarnessesConfig, OutputFormat, TargetConfig, TargetType};
 use agentbackup::{init_config_interactive, run_backup, scan_harnesses};
 use rusqlite::Connection;
 use std::fs;
@@ -477,7 +475,6 @@ fn scan_and_per_chat_markdown_backup_with_metadata_incremental_force_and_retenti
             target_type: TargetType::Local,
             path: backup_dir.display().to_string(),
             format: OutputFormat::Markdown,
-            layout: OutputLayout::PerChat,
         }],
     };
 
@@ -607,7 +604,6 @@ fn missing_target_directory_returns_clear_error_without_creating_it() {
             target_type: TargetType::Local,
             path: missing_dir.display().to_string(),
             format: OutputFormat::Markdown,
-            layout: OutputLayout::PerChat,
         }],
     };
 
@@ -620,66 +616,51 @@ fn missing_target_directory_returns_clear_error_without_creating_it() {
 }
 
 #[test]
-fn grouped_monthly_and_per_project_formats_include_metadata_and_preserve_deleted_sessions() {
+fn txt_and_json_formats_include_full_metadata_and_preserve_deleted_sessions() {
     let tmp = TempDir::new().unwrap();
     let harnesses = build_fixture_harnesses(tmp.path());
     let state_path = tmp.path().join("state.json");
 
-    let txt_monthly_dir = tmp.path().join("txt_monthly");
-    let json_project_dir = tmp.path().join("json_project");
-    let md_project_dir = tmp.path().join("md_project");
-    fs::create_dir_all(&txt_monthly_dir).unwrap();
-    fs::create_dir_all(&json_project_dir).unwrap();
-    fs::create_dir_all(&md_project_dir).unwrap();
+    let txt_dir = tmp.path().join("txt_out");
+    let json_dir = tmp.path().join("json_out");
+    fs::create_dir_all(&txt_dir).unwrap();
+    fs::create_dir_all(&json_dir).unwrap();
 
     let cfg = Config {
         redact_secrets: true,
         harnesses: harnesses.clone(),
         targets: vec![
             TargetConfig {
-                name: "txt-monthly".to_string(),
+                name: "txt-target".to_string(),
                 target_type: TargetType::Local,
-                path: txt_monthly_dir.display().to_string(),
+                path: txt_dir.display().to_string(),
                 format: OutputFormat::Txt,
-                layout: OutputLayout::Monthly,
             },
             TargetConfig {
-                name: "json-project".to_string(),
+                name: "json-target".to_string(),
                 target_type: TargetType::Local,
-                path: json_project_dir.display().to_string(),
+                path: json_dir.display().to_string(),
                 format: OutputFormat::Json,
-                layout: OutputLayout::PerProject,
-            },
-            TargetConfig {
-                name: "md-project".to_string(),
-                target_type: TargetType::Local,
-                path: md_project_dir.display().to_string(),
-                format: OutputFormat::Markdown,
-                layout: OutputLayout::PerProject,
             },
         ],
     };
 
     let reports = run_backup(&cfg, &state_path, false, false).unwrap();
-    assert_eq!(reports.len(), 3);
-    assert!(txt_monthly_dir.join("INDEX.txt").is_file());
-    assert!(txt_monthly_dir
-        .join("my-web-app")
-        .join("2026-11.txt")
-        .is_file());
-    assert!(json_project_dir.join("index.json").is_file());
-    assert!(json_project_dir.join("cli-tools.json").is_file());
-    assert!(md_project_dir.join("my-web-app.md").is_file());
+    assert_eq!(reports.len(), 2);
+    assert!(txt_dir.join("INDEX.txt").is_file());
+    assert!(json_dir.join("index.json").is_file());
 
-    // Verify JSON output metadata for Codex (both plain .jsonl and .jsonl.zst)
-    let cli_json: serde_json::Value = serde_json::from_str(
-        &fs::read_to_string(json_project_dir.join("cli-tools.json")).unwrap(),
-    )
-    .unwrap();
-    let convs = cli_json["conversations"].as_array().unwrap();
-    assert_eq!(convs.len(), 2);
+    // Verify JSON per-chat exports for Codex (both plain .jsonl and .jsonl.zst)
+    let cli_json_dir = json_dir.join("cli-tools");
+    let mut codex_convs = Vec::new();
+    for entry in fs::read_dir(&cli_json_dir).unwrap().flatten() {
+        let raw = fs::read_to_string(entry.path()).unwrap();
+        let val: serde_json::Value = serde_json::from_str(&raw).unwrap();
+        codex_convs.push(val);
+    }
+    assert_eq!(codex_convs.len(), 2);
 
-    let plain_codex = convs
+    let plain_codex = codex_convs
         .iter()
         .find(|c| c["id"] == "codex:019b1111-2222-7333-8444-555566667777")
         .unwrap();
@@ -694,7 +675,7 @@ fn grouped_monthly_and_per_project_formats_include_metadata_and_preserve_deleted
         "2026-11-23T09:00:17Z"
     );
 
-    let zst_codex = convs
+    let zst_codex = codex_convs
         .iter()
         .find(|c| c["id"] == "codex:019b8888-9999-7aaa-8bbb-ccccddddeeee")
         .unwrap();
@@ -704,8 +685,7 @@ fn grouped_monthly_and_per_project_formats_include_metadata_and_preserve_deleted
 
     // Verify index.json includes models and message_count
     let idx_json: serde_json::Value =
-        serde_json::from_str(&fs::read_to_string(json_project_dir.join("index.json")).unwrap())
-            .unwrap();
+        serde_json::from_str(&fs::read_to_string(json_dir.join("index.json")).unwrap()).unwrap();
     assert_eq!(idx_json["total"], 6);
     assert!(idx_json["conversations"]
         .as_array()
@@ -713,19 +693,28 @@ fn grouped_monthly_and_per_project_formats_include_metadata_and_preserve_deleted
         .iter()
         .any(|c| c["models"] == serde_json::json!(["gpt-5-codex"]) && c["message_count"] == 2));
 
-    // Verify TXT header metadata and INDEX.txt
-    let txt_initial =
-        fs::read_to_string(txt_monthly_dir.join("my-web-app").join("2026-11.txt")).unwrap();
-    assert!(txt_initial.contains("Git Branch: feat/stripe-webhooks\n"));
-    assert!(txt_initial.contains("Harness Version: 2.0.31\n"));
-    assert!(txt_initial.contains("Models: gemini-4-neon-high, gemini-4-pro\n"));
-    assert!(txt_initial.contains("[Assistant (gemini-4-pro) · 2026-11-24 16:36:14 UTC]"));
+    // Verify TXT per-chat headers and INDEX.txt
+    let txt_web_dir = txt_dir.join("my-web-app");
+    let mut ag_txt = String::new();
+    let mut cc_txt = String::new();
+    for entry in fs::read_dir(&txt_web_dir).unwrap().flatten() {
+        let name = entry.file_name().to_string_lossy().to_string();
+        if name.contains("_antigravity_") {
+            ag_txt = fs::read_to_string(entry.path()).unwrap();
+        } else if name.contains("_claude-code_") {
+            cc_txt = fs::read_to_string(entry.path()).unwrap();
+        }
+    }
+    assert!(cc_txt.contains("Git Branch: feat/stripe-webhooks\n"));
+    assert!(cc_txt.contains("Harness Version: 2.0.31\n"));
+    assert!(ag_txt.contains("Models: gemini-4-neon-high, gemini-4-pro\n"));
+    assert!(ag_txt.contains("[Assistant (gemini-4-pro) · 2026-11-24 16:36:14 UTC]"));
 
-    let idx_txt = fs::read_to_string(txt_monthly_dir.join("INDEX.txt")).unwrap();
+    let idx_txt = fs::read_to_string(txt_dir.join("INDEX.txt")).unwrap();
     assert!(idx_txt.contains("gemini-4-neon-high, gemini-4-pro"));
     assert!(idx_txt.contains("gpt-5-codex"));
 
-    // Delete Claude Code locally AND append a new turn to Antigravity (same project `my-web-app`)
+    // Delete Claude Code locally AND append a new turn to Antigravity; verify Claude Code export stays retained
     fs::remove_dir_all(Path::new(harnesses.claude_code.as_ref().unwrap())).unwrap();
     let ag_transcript = Path::new(harnesses.antigravity.as_ref().unwrap())
         .join("340b4a34-b6fc-4246-8695-96038e1633d1")
@@ -749,22 +738,15 @@ fn grouped_monthly_and_per_project_formats_include_metadata_and_preserve_deleted
     )
     .unwrap();
 
-    run_backup(&cfg, &state_path, false, false).unwrap();
+    let after = run_backup(&cfg, &state_path, false, false).unwrap();
+    assert_eq!(after[0].stats.updated_count, 1);
+    assert_eq!(after[0].stats.total_tracked, 6);
 
-    let md_proj_content = fs::read_to_string(md_project_dir.join("my-web-app.md")).unwrap();
-    assert!(md_proj_content.contains("Follow-up check on token expiry"));
-    assert!(
-        md_proj_content.contains("Add Stripe webhook handler"),
-        "Grouped markdown file must retain locally deleted conversation"
-    );
-
-    let txt_monthly_content =
-        fs::read_to_string(txt_monthly_dir.join("my-web-app").join("2026-11.txt")).unwrap();
-    assert!(txt_monthly_content.contains("Follow-up check on token expiry"));
-    assert!(
-        txt_monthly_content.contains("Add Stripe webhook handler"),
-        "Grouped txt file must retain locally deleted conversation"
-    );
+    let still_has_cc_txt = fs::read_dir(&txt_web_dir)
+        .unwrap()
+        .flatten()
+        .any(|e| e.file_name().to_string_lossy().contains("_claude-code_"));
+    assert!(still_has_cc_txt);
 }
 
 #[test]
@@ -775,11 +757,7 @@ fn init_wizard_rejects_missing_path_then_saves_valid_config() {
     let missing_dir = tmp.path().join("nope");
     let cfg_path = tmp.path().join("config.toml");
 
-    let input = format!(
-        "{}\n{}\ntxt\nmonthly\n",
-        missing_dir.display(),
-        valid_dir.display()
-    );
+    let input = format!("{}\n{}\ntxt\n", missing_dir.display(), valid_dir.display());
     let mut reader = Cursor::new(input.as_bytes());
     let mut output = Vec::new();
 
@@ -789,5 +767,4 @@ fn init_wizard_rejects_missing_path_then_saves_valid_config() {
     assert!(cfg_path.is_file());
     assert_eq!(cfg.targets.len(), 1);
     assert_eq!(cfg.targets[0].format, OutputFormat::Txt);
-    assert_eq!(cfg.targets[0].layout, OutputLayout::Monthly);
 }
