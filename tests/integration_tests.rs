@@ -75,6 +75,37 @@ fn setup_antigravity_fixture(root: &Path) {
         content.push('\n');
     }
     fs::write(logs_dir.join("transcript.jsonl"), content).unwrap();
+
+    // Also add an Antigravity subagent folder (SYSTEM_MESSAGE + PLANNER_RESPONSE only, 0 USER_INPUT)
+    // which must be skipped completely.
+    let sub_logs = root
+        .join("2d2feb95-9dba-4240-8882-9ef1471a01b1")
+        .join(".system_generated")
+        .join("logs");
+    fs::create_dir_all(&sub_logs).unwrap();
+    let sub_lines = [
+        serde_json::json!({
+            "step_index": 0,
+            "source": "SYSTEM",
+            "type": "SYSTEM_MESSAGE",
+            "created_at": "2026-11-24T11:09:42Z",
+            "content": "<SYSTEM_MESSAGE>\n[Message] sender=parent-conv content=Do subagent task\n</SYSTEM_MESSAGE>"
+        }),
+        serde_json::json!({
+            "step_index": 1,
+            "source": "MODEL",
+            "type": "PLANNER_RESPONSE",
+            "model": "gemini-4-hydrogen-tiered-high",
+            "created_at": "2026-11-24T11:31:06Z",
+            "content": "Completed subagent work and reported back to caller agent."
+        }),
+    ];
+    let mut sub_body = String::new();
+    for line in sub_lines {
+        sub_body.push_str(&line.to_string());
+        sub_body.push('\n');
+    }
+    fs::write(sub_logs.join("transcript.jsonl"), sub_body).unwrap();
 }
 
 fn setup_claude_code_fixture(root: &Path) {
@@ -280,6 +311,38 @@ fn setup_codex_fixtures(root: &Path) {
     let mut encoder = zstd::stream::write::Encoder::new(zst_file, 3).unwrap();
     encoder.write_all(zst_raw.as_bytes()).unwrap();
     encoder.finish().unwrap();
+
+    // 3. Codex subagent session (must be skipped)
+    let sub_codex = [
+        serde_json::json!({
+            "timestamp": "2026-11-23T13:00:00Z",
+            "type": "session_meta",
+            "payload": {
+                "id": "019b7777-8888-7999-8aaa-bbbbccccdddd",
+                "cwd": "/Users/tester/workdir/cli-tools",
+                "source": {"subagent": {"thread_spawn": {"parent_thread_id": plain_uuid}}}
+            }
+        }),
+        serde_json::json!({
+            "timestamp": "2026-11-23T13:00:05Z",
+            "type": "response_item",
+            "payload": {
+                "type": "message",
+                "role": "user",
+                "content": [{"type": "input_text", "text": "Internal delegated subagent task"}]
+            }
+        }),
+    ];
+    let mut sub_codex_body = String::new();
+    for line in sub_codex {
+        sub_codex_body.push_str(&line.to_string());
+        sub_codex_body.push('\n');
+    }
+    fs::write(
+        day_dir.join("rollout-2026-11-23T13-00-00-019b7777-8888-7999-8aaa-bbbbccccdddd.jsonl"),
+        sub_codex_body,
+    )
+    .unwrap();
 }
 
 fn setup_opencode_fixtures(root: &Path) {
@@ -291,7 +354,7 @@ fn setup_opencode_fixtures(root: &Path) {
     conn.execute_batch(
         "
         CREATE TABLE project (id TEXT PRIMARY KEY, worktree TEXT);
-        CREATE TABLE session (id TEXT PRIMARY KEY, project_id TEXT, title TEXT, directory TEXT, version TEXT, time_created INTEGER, time_updated INTEGER);
+        CREATE TABLE session (id TEXT PRIMARY KEY, project_id TEXT, parent_id TEXT, title TEXT, directory TEXT, version TEXT, time_created INTEGER, time_updated INTEGER);
         CREATE TABLE message (id TEXT PRIMARY KEY, session_id TEXT, time_created INTEGER, data TEXT);
         CREATE TABLE part (id TEXT PRIMARY KEY, message_id TEXT, session_id TEXT, time_created INTEGER, data TEXT);
         ",
@@ -304,15 +367,52 @@ fn setup_opencode_fixtures(root: &Path) {
     )
     .unwrap();
     conn.execute(
-        "INSERT INTO session (id, project_id, title, directory, version, time_created, time_updated) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        "INSERT INTO session (id, project_id, parent_id, title, directory, version, time_created, time_updated) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
         rusqlite::params![
             "ses_sqlite_01",
             "proj_1",
+            Option::<String>::None,
             "Refactor SQLite queries",
             "/Users/tester/workdir/opencode-demo",
             "1.2.8",
             1795440005000i64,
             1795440612000i64
+        ],
+    )
+    .unwrap();
+    // Child subagent session with parent_id set (must be skipped)
+    conn.execute(
+        "INSERT INTO session (id, project_id, parent_id, title, directory, version, time_created, time_updated) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+        rusqlite::params![
+            "ses_sqlite_child",
+            "proj_1",
+            Some("ses_sqlite_01"),
+            "Subagent child session",
+            "/Users/tester/workdir/opencode-demo",
+            "1.2.8",
+            1795440020000i64,
+            1795440030000i64
+        ],
+    )
+    .unwrap();
+    conn.execute(
+        "INSERT INTO message (id, session_id, time_created, data) VALUES (?1, ?2, ?3, ?4)",
+        rusqlite::params![
+            "msg_child_u",
+            "ses_sqlite_child",
+            1795440020000i64,
+            r#"{"role":"user"}"#
+        ],
+    )
+    .unwrap();
+    conn.execute(
+        "INSERT INTO part (id, message_id, session_id, time_created, data) VALUES (?1, ?2, ?3, ?4, ?5)",
+        rusqlite::params![
+            "prt_child_1",
+            "msg_child_u",
+            "ses_sqlite_child",
+            1795440020000i64,
+            r#"{"type":"text","text":"Child subagent prompt"}"#
         ],
     )
     .unwrap();

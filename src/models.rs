@@ -116,6 +116,10 @@ impl Conversation {
             .unwrap_or_else(|| "undated".to_string())
     }
 
+    pub fn has_user_message(&self) -> bool {
+        self.messages.iter().any(|m| m.role == Role::User)
+    }
+
     /// Recompute `message_count` and deduplicated `models` list in order of appearance.
     pub fn refresh_derived_fields(&mut self) {
         self.message_count = self.messages.len();

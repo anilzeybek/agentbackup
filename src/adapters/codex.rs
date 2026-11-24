@@ -122,6 +122,20 @@ fn parse_codex_reader<R: BufRead>(
         match line_type {
             "session_meta" => {
                 if let Some(payload) = val.get("payload") {
+                    // Skip Codex subagent sessions
+                    if payload
+                        .get("source")
+                        .and_then(|s| s.as_object())
+                        .map(|o| o.contains_key("subagent"))
+                        .unwrap_or(false)
+                        || payload
+                            .get("source")
+                            .and_then(|s| s.as_str())
+                            .map(|s| s.eq_ignore_ascii_case("subagent"))
+                            .unwrap_or(false)
+                    {
+                        return Ok(None);
+                    }
                     if let Some(id) = payload.get("id").and_then(|v| v.as_str()) {
                         if !id.trim().is_empty() {
                             session_id = id.to_string();
@@ -363,7 +377,7 @@ fn parse_codex_reader<R: BufRead>(
         event_messages
     };
 
-    if messages.is_empty() {
+    if !messages.iter().any(|m| m.role == Role::User) {
         return Ok(None);
     }
 

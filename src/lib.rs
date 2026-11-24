@@ -67,7 +67,7 @@ pub fn scan_harnesses(cfg: &Config) -> Result<Vec<HarnessScanSummary>> {
             .filter_map(|src| {
                 let mut conv = adapter.parse(src).ok().flatten()?;
                 sanitize_conversation(&mut conv, cfg.redact_secrets);
-                if conv.messages.is_empty() {
+                if !conv.has_user_message() {
                     return None;
                 }
                 let rendered = render_single(&conv, OutputFormat::Markdown).ok()?;
@@ -171,7 +171,7 @@ pub fn run_backup(
                 _ => return None,
             };
             sanitize_conversation(&mut conv, cfg.redact_secrets);
-            if conv.messages.is_empty() {
+            if !conv.has_user_message() {
                 return None;
             }
             let sha = conversation_sha256(&conv);

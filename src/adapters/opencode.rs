@@ -114,6 +114,7 @@ fn discover_sqlite_sessions(db_path: &Path) -> Result<Vec<DiscoveredSource>> {
 
     let has_updated = table_has_column(&conn, "session", "time_updated");
     let has_created = table_has_column(&conn, "session", "time_created");
+    let has_parent_id = table_has_column(&conn, "session", "parent_id");
 
     let time_col = if has_updated {
         "COALESCE(s.time_updated, s.time_created, 0)"
@@ -123,11 +124,17 @@ fn discover_sqlite_sessions(db_path: &Path) -> Result<Vec<DiscoveredSource>> {
         "0"
     };
 
+    let where_clause = if has_parent_id {
+        "WHERE s.parent_id IS NULL OR s.parent_id = ''"
+    } else {
+        ""
+    };
+
     let sql = format!(
         "SELECT s.id, {time_col}, \
          COALESCE((SELECT SUM(LENGTH(p.data)) FROM part p WHERE p.session_id = s.id), 0) + \
          COALESCE((SELECT SUM(LENGTH(m.data)) FROM message m WHERE m.session_id = s.id), 0) \
-         FROM session s"
+         FROM session s {where_clause}"
     );
 
     let mut stmt = conn.prepare(&sql)?;
@@ -380,7 +387,7 @@ fn parse_sqlite_session(
         });
     }
 
-    if messages.is_empty() {
+    if !messages.iter().any(|m| m.role == Role::User) {
         return Ok(None);
     }
 
@@ -437,6 +444,16 @@ fn discover_legacy_sessions(
             let Ok(val) = serde_json::from_str::<Value>(&raw) else {
                 continue;
             };
+            // Skip child subagent sessions
+            if val
+                .get("parentID")
+                .or_else(|| val.get("parent_id"))
+                .and_then(|v| v.as_str())
+                .map(|s| !s.trim().is_empty())
+                .unwrap_or(false)
+            {
+                continue;
+            }
             let session_id = val
                 .get("id")
                 .and_then(|v| v.as_str())
@@ -669,7 +686,7 @@ fn parse_legacy_session(
         });
     }
 
-    if messages.is_empty() {
+    if !messages.iter().any(|m| m.role == Role::User) {
         return Ok(None);
     }
 

@@ -230,7 +230,7 @@ impl HarnessAdapter for ClaudeCodeAdapter {
             }
         }
 
-        if messages.is_empty() {
+        if !messages.iter().any(|m| m.role == Role::User) {
             return Ok(None);
         }
 
