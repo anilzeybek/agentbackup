@@ -651,8 +651,11 @@ fn setup_pi_fixture(root: &Path) {
 }
 
 fn setup_deepseek_fixtures(root: &Path) {
-    // 1. Plain session.v4.jsonl with assistant/message, request/header, session/title
-    let s1_dir = root.join("sessions").join("dsh-plain-101");
+    // 1. Plain session.v4.jsonl with real `session-<uuid>` directory naming
+    let s1_dir = root
+        .join("sessions")
+        .join("--Users-tester-workdir-dsh-app--")
+        .join("session-65f39bab-3395-4208-a358-4ab57306396a");
     fs::create_dir_all(&s1_dir).unwrap();
     let s1_lines = [
         serde_json::json!({
@@ -660,7 +663,7 @@ fn setup_deepseek_fixtures(root: &Path) {
             "seq": 0,
             "time": 1795442400000i64,
             "data": {
-                "sessionId": "dsh-plain-101",
+                "sessionId": "session-65f39bab-3395-4208-a358-4ab57306396a",
                 "cwd": "/Users/tester/workdir/dsh-app",
                 "cliVersion": "0.9.2",
                 "git": {"branch": "feat/cordis"}
@@ -937,25 +940,35 @@ fn scan_and_per_chat_markdown_backup_with_metadata_incremental_and_retention() {
 
     // Verify DeepSeek Harness exports: plain v4 + zstd chunk-coalesced (subagent skipped)
     let dsh_dir = backup_dir.join("deepseek").join("dsh-app");
-    let dsh_files: Vec<String> = fs::read_dir(&dsh_dir)
+    let dsh_entries: Vec<(String, String)> = fs::read_dir(&dsh_dir)
         .unwrap()
         .flatten()
-        .map(|e| fs::read_to_string(e.path()).unwrap())
+        .map(|e| {
+            (
+                e.file_name().to_string_lossy().to_string(),
+                fs::read_to_string(e.path()).unwrap(),
+            )
+        })
         .collect();
-    assert_eq!(dsh_files.len(), 2);
-    let dsh_plain = dsh_files
+    assert_eq!(dsh_entries.len(), 2);
+    let (dsh_plain_name, dsh_plain) = dsh_entries
         .iter()
-        .find(|c| c.contains("deepseek:dsh-plain-101"))
+        .find(|(_, c)| c.contains("deepseek:65f39bab-3395-4208-a358-4ab57306396a"))
         .unwrap();
+    assert!(
+        dsh_plain_name.ends_with("_65f39b.md"),
+        "Expected unique 6-char hex short_id, got {}",
+        dsh_plain_name
+    );
     assert!(dsh_plain.contains("title: \"Cordis plugin lifecycle review\""));
     assert!(dsh_plain.contains("harness_version: \"0.9.2\""));
     assert!(dsh_plain.contains("git_branch: \"feat/cordis\""));
     assert!(dsh_plain.contains("models:\n  - deepseek-v4-pro\n"));
     assert!(!dsh_plain.contains("DSH_HIDDEN_REASONING"));
 
-    let dsh_zst = dsh_files
+    let (_, dsh_zst) = dsh_entries
         .iter()
-        .find(|c| c.contains("deepseek:dsh-zstd-202"))
+        .find(|(_, c)| c.contains("deepseek:dsh-zstd-202"))
         .unwrap();
     assert!(dsh_zst.contains("models:\n  - deepseek-reasoner\n"));
     assert!(dsh_zst.contains("Chunks are coalesced cleanly."));

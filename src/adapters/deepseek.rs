@@ -561,7 +561,7 @@ fn extract_dsh_session_id(path: &Path, root: &Path) -> String {
         .or_else(|| file_name.strip_suffix(".jsonl"))
         .unwrap_or(file_name);
 
-    // Common layout: `$DSH_HOME/sessions/<session-id>/session.v4.jsonl.zstd` -> use parent dir name!
+    // Common layout: `$DSH_HOME/sessions/<project>/session-<uuid>/session.v4.jsonl.zstd` -> use parent dir name!
     if stem == "session" || stem.starts_with("session.v") {
         if let Some(parent_name) = path
             .parent()
@@ -570,12 +570,21 @@ fn extract_dsh_session_id(path: &Path, root: &Path) -> String {
             .and_then(|s| s.to_str())
         {
             if parent_name != "sessions" && !parent_name.is_empty() {
-                return parent_name.to_string();
+                let cleaned = parent_name
+                    .strip_prefix("session-")
+                    .or_else(|| parent_name.strip_prefix("session_"))
+                    .unwrap_or(parent_name);
+                if !cleaned.is_empty() {
+                    return cleaned.to_string();
+                }
             }
         }
     }
 
-    stem.to_string()
+    stem.strip_prefix("session-")
+        .or_else(|| stem.strip_prefix("session_"))
+        .unwrap_or(stem)
+        .to_string()
 }
 
 fn update_timestamps(
