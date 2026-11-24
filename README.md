@@ -16,6 +16,12 @@ All harness adapters are strictly **read-only**.
 ## Install
 
 ```bash
+./install.sh
+```
+
+Installs the release binary to `~/.local/bin/agentbackup` (override with `INSTALL_DIR=/usr/local/bin ./install.sh`). Or install directly via Cargo:
+
+```bash
 cargo install --path .
 ```
 
