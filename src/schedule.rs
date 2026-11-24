@@ -6,7 +6,7 @@ use std::process::Command;
 
 use crate::config::{config_dir, home_dir};
 
-const LAUNCHD_LABEL: &str = "com.agentbackup.sync";
+pub const LAUNCHD_LABEL: &str = "com.agentbackup.sync";
 
 pub fn plist_path() -> PathBuf {
     home_dir()
@@ -17,6 +17,77 @@ pub fn plist_path() -> PathBuf {
 
 pub fn log_path() -> PathBuf {
     config_dir().join("launchd.log")
+}
+
+#[derive(Debug, Clone)]
+pub struct ScheduleInfo {
+    pub supported: bool,
+    pub installed: bool,
+    pub loaded: bool,
+    pub interval_seconds: Option<u64>,
+    pub plist_path: PathBuf,
+    pub log_path: PathBuf,
+    pub recent_log_lines: Vec<String>,
+}
+
+/// Inspect macOS launchd schedule state and recent log tail for `agentbackup status`.
+pub fn inspect() -> ScheduleInfo {
+    let plist = plist_path();
+    let log = log_path();
+
+    if !cfg!(target_os = "macos") {
+        return ScheduleInfo {
+            supported: false,
+            installed: false,
+            loaded: false,
+            interval_seconds: None,
+            plist_path: plist,
+            log_path: log,
+            recent_log_lines: Vec::new(),
+        };
+    }
+
+    let installed = plist.exists();
+    let interval_seconds = if installed {
+        fs::read_to_string(&plist)
+            .ok()
+            .and_then(|xml| extract_plist_interval(&xml))
+    } else {
+        None
+    };
+
+    let loaded = if installed {
+        Command::new("launchctl")
+            .args(["list", LAUNCHD_LABEL])
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false)
+    } else {
+        false
+    };
+
+    let recent_log_lines = if log.is_file() {
+        fs::read_to_string(&log)
+            .ok()
+            .map(|raw| {
+                let lines: Vec<&str> = raw.lines().collect();
+                let start = lines.len().saturating_sub(8);
+                lines[start..].iter().map(|s| s.to_string()).collect()
+            })
+            .unwrap_or_default()
+    } else {
+        Vec::new()
+    };
+
+    ScheduleInfo {
+        supported: true,
+        installed,
+        loaded,
+        interval_seconds,
+        plist_path: plist,
+        log_path: log,
+        recent_log_lines,
+    }
 }
 
 /// Parse a human-friendly interval string like `30m`, `1h`, `6h`, `1d`, or `300s` into seconds.
@@ -111,7 +182,6 @@ pub fn install(every: &str) -> Result<()> {
             .with_context(|| format!("Failed to create {}", parent.display()))?;
     }
 
-    // Unload existing agent if already installed (ignore errors if not loaded)
     if plist.exists() {
         let _ = unload_launchd(&plist);
     }
@@ -127,56 +197,7 @@ pub fn install(every: &str) -> Result<()> {
     println!("  Binary:   {}", exe.display());
     println!("  Plist:    {}", plist.display());
     println!("  Log:      {}", log.display());
-    Ok(())
-}
-
-pub fn status() -> Result<()> {
-    if !cfg!(target_os = "macos") {
-        bail!("`agentbackup schedule` currently supports macOS launchd only.");
-    }
-
-    let plist = plist_path();
-    let log = log_path();
-
-    if !plist.exists() {
-        println!("Schedule status: not installed");
-        println!("Run `agentbackup schedule install --every 1h` to enable automatic backups.");
-        return Ok(());
-    }
-
-    println!("Schedule status: installed");
-    println!("  Label: {}", LAUNCHD_LABEL);
-    println!("  Plist: {}", plist.display());
-
-    if let Ok(xml) = fs::read_to_string(&plist) {
-        if let Some(secs) = extract_plist_interval(&xml) {
-            println!("  Interval: {}s", secs);
-        }
-    }
-
-    let loaded = Command::new("launchctl")
-        .args(["list", LAUNCHD_LABEL])
-        .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false);
-    println!("  Loaded in launchd: {}", if loaded { "yes" } else { "no" });
-
-    if log.is_file() {
-        println!("  Log: {}", log.display());
-        if let Ok(raw) = fs::read_to_string(&log) {
-            let lines: Vec<&str> = raw.lines().collect();
-            let tail_start = lines.len().saturating_sub(10);
-            if !lines.is_empty() {
-                println!("\nRecent log output:");
-                for line in &lines[tail_start..] {
-                    println!("  {}", line);
-                }
-            }
-        }
-    } else {
-        println!("  Log: {} (no runs logged yet)", log.display());
-    }
-
+    println!("Check health anytime with `agentbackup status`.");
     Ok(())
 }
 

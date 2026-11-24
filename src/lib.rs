@@ -2,6 +2,7 @@ pub mod adapters;
 pub mod cli;
 pub mod config;
 pub mod models;
+pub mod notify;
 pub mod render;
 pub mod sanitize;
 pub mod schedule;
@@ -9,7 +10,10 @@ pub mod state;
 pub mod targets;
 
 use anyhow::{bail, Result};
+use chrono::Utc;
 use rayon::prelude::*;
+use std::collections::BTreeMap;
+use std::fs;
 use std::io::{BufRead, Write};
 use std::path::Path;
 
@@ -17,11 +21,13 @@ use crate::adapters::{adapter_for, all_adapters};
 use crate::config::{
     contract_tilde, detect_harnesses, expand_tilde, Config, OutputFormat, TargetConfig, TargetType,
 };
-use crate::models::{Conversation, DiscoveredSource, Harness};
+use crate::models::{Conversation, DiscoveredSource, Harness, ParseOutcome};
 use crate::render::render_single;
 use crate::sanitize::sanitize_conversation;
-use crate::state::{conversation_sha256, BackupState};
+use crate::state::{conversation_sha256, BackupState, LastRun, RunStatus};
 use crate::targets::{build_target, SyncItem, SyncStats};
+
+pub const NOTIFICATION_COOLDOWN_HOURS: i64 = 24;
 
 #[derive(Debug, Clone)]
 pub struct HarnessScanSummary {
@@ -39,6 +45,12 @@ pub struct TargetRunReport {
     pub path: String,
     pub format: OutputFormat,
     pub stats: SyncStats,
+}
+
+#[derive(Debug, Clone)]
+pub struct RunOutcome {
+    pub reports: Vec<TargetRunReport>,
+    pub warnings: Vec<String>,
 }
 
 pub fn scan_harnesses(cfg: &Config) -> Result<Vec<HarnessScanSummary>> {
@@ -65,7 +77,10 @@ pub fn scan_harnesses(cfg: &Config) -> Result<Vec<HarnessScanSummary>> {
         let (session_count, est_export_bytes): (usize, u64) = sources
             .par_iter()
             .filter_map(|src| {
-                let mut conv = adapter.parse(src).ok().flatten()?;
+                let mut conv = match adapter.parse(src) {
+                    Ok(ParseOutcome::Conversation(c)) => c,
+                    _ => return None,
+                };
                 sanitize_conversation(&mut conv, cfg.redact_secrets);
                 if !conv.has_user_message() {
                     return None;
@@ -95,11 +110,26 @@ struct ParsedConversation {
     content_sha256: String,
 }
 
-pub fn run_backup(
-    cfg: &Config,
-    state_path: &Path,
-    dry_run: bool,
-) -> Result<Vec<TargetRunReport>> {
+enum ParseJobResult {
+    Parsed(ParsedConversation),
+    Skipped,
+    Unrecognized(Harness, String),
+    Error(Harness, String),
+}
+
+fn dir_has_non_hidden_entries(root: &Path) -> bool {
+    let Ok(entries) = fs::read_dir(root) else {
+        return false;
+    };
+    entries.flatten().any(|e| {
+        e.file_name()
+            .to_str()
+            .map(|n| !n.starts_with('.'))
+            .unwrap_or(false)
+    })
+}
+
+pub fn run_backup(cfg: &Config, state_path: &Path, dry_run: bool) -> Result<RunOutcome> {
     if cfg.targets.is_empty() {
         bail!("No backup targets configured. Run `agentbackup init` first.");
     }
@@ -112,14 +142,39 @@ pub fn run_backup(
     }
 
     let mut state = BackupState::load_or_default(state_path)?;
+    let mut warnings: Vec<String> = Vec::new();
 
-    // Discover sources across all configured harnesses
+    // Discover sources across all configured harnesses (collecting drift warnings per harness)
     let mut discovered: Vec<DiscoveredSource> = Vec::new();
     for adapter in all_adapters() {
-        if let Some(root) = cfg.harnesses.path_for(adapter.harness()) {
-            if root.exists() {
-                let mut found = adapter.discover(&root)?;
+        let harness = adapter.harness();
+        let Some(root) = cfg.harnesses.path_for(harness) else {
+            continue;
+        };
+        if !root.exists() {
+            continue;
+        }
+        match adapter.discover(&root) {
+            Ok(mut found) => {
+                if found.is_empty() && dir_has_non_hidden_entries(&root) {
+                    let prev_tracked = state.tracked_count_for_harness(harness);
+                    if prev_tracked > 0 {
+                        warnings.push(format!(
+                            "{}: directory has entries but 0 sessions were discovered (previously tracked {}) — storage layout may have changed",
+                            harness.as_str(),
+                            prev_tracked
+                        ));
+                    }
+                }
                 discovered.append(&mut found);
+            }
+            Err(err) => {
+                warnings.push(format!(
+                    "{}: failed to inspect {} ({}) — storage schema may have changed",
+                    harness.as_str(),
+                    contract_tilde(&root),
+                    err
+                ));
             }
         }
     }
@@ -131,10 +186,9 @@ pub fn run_backup(
 
     for src in &discovered {
         let mut all_targets_can_skip = src.source_mtime > 0;
-        let mut target_skips = vec![false; cfg.targets.len()];
 
         if all_targets_can_skip {
-            for (idx, tcfg) in cfg.targets.iter().enumerate() {
+            for tcfg in &cfg.targets {
                 let can_skip = state
                     .targets
                     .get(&tcfg.name)
@@ -145,9 +199,9 @@ pub fn run_backup(
                             && tcfg.resolved_path().join(&rec.rel_path).is_file()
                     })
                     .unwrap_or(false);
-                target_skips[idx] = can_skip;
                 if !can_skip {
                     all_targets_can_skip = false;
+                    break;
                 }
             }
         }
@@ -161,28 +215,73 @@ pub fn run_backup(
         }
     }
 
-    // Parse and sanitize needed conversations in parallel
-    let parsed: Vec<ParsedConversation> = to_parse
+    // Parse and sanitize needed conversations in parallel, tracking drift/parse issues
+    let job_results: Vec<ParseJobResult> = to_parse
         .par_iter()
-        .filter_map(|src| {
+        .map(|src| {
             let adapter = adapter_for(src.harness);
-            let mut conv = match adapter.parse(src) {
-                Ok(Some(c)) => c,
-                _ => return None,
-            };
-            sanitize_conversation(&mut conv, cfg.redact_secrets);
-            if !conv.has_user_message() {
-                return None;
+            match adapter.parse(src) {
+                Ok(ParseOutcome::Conversation(mut conv)) => {
+                    sanitize_conversation(&mut conv, cfg.redact_secrets);
+                    if !conv.has_user_message() {
+                        return ParseJobResult::Skipped;
+                    }
+                    let sha = conversation_sha256(&conv);
+                    ParseJobResult::Parsed(ParsedConversation {
+                        conversation: conv,
+                        source_mtime: src.source_mtime,
+                        source_size: src.source_size,
+                        content_sha256: sha,
+                    })
+                }
+                Ok(ParseOutcome::Skipped) => ParseJobResult::Skipped,
+                Ok(ParseOutcome::UnrecognizedSchema(detail)) => {
+                    ParseJobResult::Unrecognized(src.harness, detail)
+                }
+                Err(err) => ParseJobResult::Error(src.harness, err.to_string()),
             }
-            let sha = conversation_sha256(&conv);
-            Some(ParsedConversation {
-                conversation: conv,
-                source_mtime: src.source_mtime,
-                source_size: src.source_size,
-                content_sha256: sha,
-            })
         })
         .collect();
+
+    let mut parsed: Vec<ParsedConversation> = Vec::new();
+    let mut unrecognized_by_harness: BTreeMap<Harness, (usize, String)> = BTreeMap::new();
+    let mut errors_by_harness: BTreeMap<Harness, (usize, String)> = BTreeMap::new();
+
+    for res in job_results {
+        match res {
+            ParseJobResult::Parsed(p) => parsed.push(p),
+            ParseJobResult::Skipped => {}
+            ParseJobResult::Unrecognized(h, detail) => {
+                unrecognized_by_harness
+                    .entry(h)
+                    .and_modify(|(c, _)| *c += 1)
+                    .or_insert((1, detail));
+            }
+            ParseJobResult::Error(h, detail) => {
+                errors_by_harness
+                    .entry(h)
+                    .and_modify(|(c, _)| *c += 1)
+                    .or_insert((1, detail));
+            }
+        }
+    }
+
+    for (h, (count, sample)) in unrecognized_by_harness {
+        warnings.push(format!(
+            "{}: {} file(s) had unrecognized format (e.g. {}) — harness schema may have changed",
+            h.as_str(),
+            count,
+            sample
+        ));
+    }
+    for (h, (count, sample)) in errors_by_harness {
+        warnings.push(format!(
+            "{}: {} session(s) failed to parse (e.g. {}) — harness format may have changed",
+            h.as_str(),
+            count,
+            sample
+        ));
+    }
 
     let items: Vec<SyncItem<'_>> = parsed
         .iter()
@@ -211,10 +310,225 @@ pub fn run_backup(
     }
 
     if !dry_run {
+        let total_new: usize = reports.iter().map(|r| r.stats.new_count).sum();
+        let total_updated: usize = reports.iter().map(|r| r.stats.updated_count).sum();
+        let total_skipped: usize = reports.iter().map(|r| r.stats.skipped_count).sum();
+        state.last_run = Some(LastRun {
+            timestamp: Utc::now(),
+            status: if warnings.is_empty() {
+                RunStatus::Ok
+            } else {
+                RunStatus::Warning
+            },
+            new_count: total_new,
+            updated_count: total_updated,
+            skipped_count: total_skipped,
+            warnings: warnings.clone(),
+            error: None,
+        });
         state.save_to(state_path)?;
     }
 
-    Ok(reports)
+    Ok(RunOutcome { reports, warnings })
+}
+
+/// Persist a failed run's error into `state.json` so `agentbackup status` surfaces it.
+pub fn record_run_error(state_path: &Path, err_msg: &str) -> Result<()> {
+    let mut state = BackupState::load_or_default(state_path)?;
+    state.last_run = Some(LastRun {
+        timestamp: Utc::now(),
+        status: RunStatus::Error,
+        new_count: 0,
+        updated_count: 0,
+        skipped_count: 0,
+        warnings: Vec::new(),
+        error: Some(err_msg.to_string()),
+    });
+    state.save_to(state_path)
+}
+
+/// Send rate-limited (once per 24h per issue key) macOS notifications on run errors or drift warnings.
+pub fn notify_issues_if_needed(
+    cfg: &Config,
+    state_path: &Path,
+    warnings: &[String],
+    error: Option<&str>,
+) {
+    if !cfg.notify {
+        return;
+    }
+    let Ok(mut state) = BackupState::load_or_default(state_path) else {
+        return;
+    };
+    let now = Utc::now();
+    let mut state_dirty = false;
+
+    if let Some(err) = error {
+        let key = format!("error:{}", err.chars().take(80).collect::<String>());
+        if state.check_and_mark_notification(&key, now, NOTIFICATION_COOLDOWN_HOURS) {
+            state_dirty = true;
+            notify::send_notification("Backup failed", err);
+        }
+    } else if !warnings.is_empty() {
+        let mut to_alert = Vec::new();
+        for w in warnings {
+            let prefix = w.split(':').next().unwrap_or("drift");
+            let key = format!("warning:{}", prefix);
+            if state.check_and_mark_notification(&key, now, NOTIFICATION_COOLDOWN_HOURS) {
+                state_dirty = true;
+                to_alert.push(w.as_str());
+            }
+        }
+        if !to_alert.is_empty() {
+            let body = if to_alert.len() == 1 {
+                to_alert[0].to_string()
+            } else {
+                format!(
+                    "{} warnings detected (run `agentbackup status` for details)",
+                    to_alert.len()
+                )
+            };
+            notify::send_notification("Schema drift or parse warning", &body);
+        }
+    }
+
+    if state_dirty {
+        let _ = state.save_to(state_path);
+    }
+}
+
+/// Build the unified `agentbackup status` report (config, target health, last run, tracked counts, launchd schedule).
+pub fn format_status_report(
+    config_path: &Path,
+    state_path: &Path,
+    sched: &schedule::ScheduleInfo,
+) -> Result<String> {
+    use std::fmt::Write as _;
+
+    let mut out = String::new();
+    writeln!(out, "agentbackup status")?;
+    writeln!(out, "{}", "=".repeat(50))?;
+
+    if !config_path.exists() {
+        writeln!(
+            out,
+            "Config:   {} (not initialized — run `agentbackup init`)",
+            contract_tilde(config_path)
+        )?;
+    } else {
+        let cfg = Config::load_from(config_path)?;
+        let state = BackupState::load_or_default(state_path)?;
+
+        writeln!(out, "Config:   {} (ok)", contract_tilde(config_path))?;
+        writeln!(
+            out,
+            "Notify:   {}",
+            if cfg.notify {
+                "enabled (macOS alerts on errors & drift warnings)"
+            } else {
+                "disabled"
+            }
+        )?;
+
+        writeln!(out, "\nTargets:")?;
+        if cfg.targets.is_empty() {
+            writeln!(out, "  (none configured)")?;
+        } else {
+            for t in &cfg.targets {
+                let resolved = t.resolved_path();
+                let health = if resolved.is_dir() { "ok" } else { "MISSING" };
+                let tracked = state
+                    .targets
+                    .get(&t.name)
+                    .map(|ts| ts.conversations.len())
+                    .unwrap_or(0);
+                writeln!(
+                    out,
+                    "  {:<10} [{:<7}] {:<8} {} ({} tracked)",
+                    t.name, health, t.format, t.path, tracked
+                )?;
+            }
+        }
+
+        writeln!(out, "\nLast Run:")?;
+        match &state.last_run {
+            Some(last) => {
+                writeln!(
+                    out,
+                    "  Time:     {}",
+                    last.timestamp.format("%Y-%m-%d %H:%M:%S UTC")
+                )?;
+                writeln!(out, "  Status:   {}", last.status.as_str())?;
+                if last.status != RunStatus::Error {
+                    writeln!(
+                        out,
+                        "  Summary:  new: {}, updated: {}, skipped: {}",
+                        last.new_count, last.updated_count, last.skipped_count
+                    )?;
+                }
+                if let Some(ref err) = last.error {
+                    writeln!(out, "  Error:    {}", err)?;
+                }
+                if !last.warnings.is_empty() {
+                    writeln!(out, "  Warnings:")?;
+                    for w in &last.warnings {
+                        writeln!(out, "    - {}", w)?;
+                    }
+                }
+            }
+            None => {
+                writeln!(out, "  (no completed backup runs recorded yet)")?;
+            }
+        }
+
+        // Per-harness tracked breakdown from the primary target (or union across targets)
+        let mut by_harness: BTreeMap<Harness, usize> = BTreeMap::new();
+        if let Some(first_target) = cfg.targets.first() {
+            if let Some(ts) = state.targets.get(&first_target.name) {
+                for rec in ts.conversations.values() {
+                    *by_harness.entry(rec.harness).or_insert(0) += 1;
+                }
+            }
+        }
+        if !by_harness.is_empty() {
+            let parts: Vec<String> = Harness::all()
+                .iter()
+                .map(|h| format!("{}: {}", h.as_str(), by_harness.get(h).copied().unwrap_or(0)))
+                .collect();
+            writeln!(out, "  Tracked:  {}", parts.join(", "))?;
+        }
+    }
+
+    writeln!(out, "\nSchedule:")?;
+    if !sched.supported {
+        writeln!(out, "  macOS launchd scheduling is not supported on this OS.")?;
+    } else if !sched.installed {
+        writeln!(
+            out,
+            "  not installed (run `agentbackup schedule install --every 1h`)"
+        )?;
+    } else {
+        let interval_str = sched
+            .interval_seconds
+            .map(|s| format!("every {}s", s))
+            .unwrap_or_else(|| "unknown interval".to_string());
+        writeln!(
+            out,
+            "  Status:   installed ({}, loaded: {})",
+            interval_str,
+            if sched.loaded { "yes" } else { "no" }
+        )?;
+        writeln!(out, "  Plist:    {}", contract_tilde(&sched.plist_path))?;
+        writeln!(out, "  Log:      {}", contract_tilde(&sched.log_path))?;
+        if !sched.recent_log_lines.is_empty() {
+            writeln!(out, "  Recent log:")?;
+            for line in &sched.recent_log_lines {
+                writeln!(out, "    {}", line)?;
+            }
+        }
+    }
+
+    Ok(out)
 }
 
 pub fn init_config_interactive<R: BufRead, W: Write>(

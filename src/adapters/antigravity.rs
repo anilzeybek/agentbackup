@@ -9,7 +9,8 @@ use crate::adapters::{
     dir_size, file_mtime_and_size, infer_project_from_text_chunks, HarnessAdapter,
 };
 use crate::models::{
-    parse_rfc3339, push_unique_model, Conversation, DiscoveredSource, Harness, Message, Role,
+    parse_rfc3339, push_unique_model, Conversation, DiscoveredSource, Harness, Message,
+    ParseOutcome, Role,
 };
 
 pub struct AntigravityAdapter;
@@ -67,7 +68,7 @@ impl HarnessAdapter for AntigravityAdapter {
         Ok(sources)
     }
 
-    fn parse(&self, source: &DiscoveredSource) -> Result<Option<Conversation>> {
+    fn parse(&self, source: &DiscoveredSource) -> Result<ParseOutcome> {
         let file = File::open(&source.path).with_context(|| {
             format!(
                 "Failed to open Antigravity transcript {}",
@@ -83,6 +84,8 @@ impl HarnessAdapter for AntigravityAdapter {
         let mut updated_at: Option<DateTime<Utc>> = None;
         let mut git_branch: Option<String> = None;
         let mut harness_version: Option<String> = None;
+        let mut json_lines = 0usize;
+        let mut recognized_events = 0usize;
 
         for line in reader.lines() {
             let line = match line {
@@ -96,6 +99,7 @@ impl HarnessAdapter for AntigravityAdapter {
             let Ok(val) = serde_json::from_str::<Value>(trimmed) else {
                 continue;
             };
+            json_lines += 1;
 
             let ts = val
                 .get("created_at")
@@ -139,6 +143,7 @@ impl HarnessAdapter for AntigravityAdapter {
 
             match step_type {
                 "USER_INPUT" => {
+                    recognized_events += 1;
                     if step_source == "SYSTEM" {
                         continue;
                     }
@@ -156,6 +161,7 @@ impl HarnessAdapter for AntigravityAdapter {
                     }
                 }
                 "PLANNER_RESPONSE" => {
+                    recognized_events += 1;
                     let msg_model = val
                         .get("model")
                         .and_then(|v| v.as_str())
@@ -187,12 +193,22 @@ impl HarnessAdapter for AntigravityAdapter {
                         }
                     }
                 }
+                "SYSTEM_MESSAGE" | "GENERIC" | "CHECKPOINT" | "EPHEMERAL_MESSAGE" => {
+                    recognized_events += 1;
+                }
                 _ => {}
             }
         }
 
         if !messages.iter().any(|m| m.role == Role::User) {
-            return Ok(None);
+            if json_lines > 0 && recognized_events == 0 {
+                return Ok(ParseOutcome::UnrecognizedSchema(format!(
+                    "{} had {} JSON lines with no recognized Antigravity step types",
+                    source.path.display(),
+                    json_lines
+                )));
+            }
+            return Ok(ParseOutcome::Skipped);
         }
 
         let (project, workspace) = match infer_project_from_text_chunks(&path_hint_chunks) {
@@ -216,6 +232,6 @@ impl HarnessAdapter for AntigravityAdapter {
             messages,
         };
         conv.refresh_derived_fields();
-        Ok(Some(conv))
+        Ok(ParseOutcome::Conversation(conv))
     }
 }

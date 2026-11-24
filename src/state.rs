@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
@@ -7,6 +7,37 @@ use std::fs;
 use std::path::Path;
 
 use crate::models::{Conversation, Harness};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum RunStatus {
+    Ok,
+    Warning,
+    Error,
+}
+
+impl RunStatus {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            RunStatus::Ok => "OK",
+            RunStatus::Warning => "WARNING",
+            RunStatus::Error => "ERROR",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LastRun {
+    pub timestamp: DateTime<Utc>,
+    pub status: RunStatus,
+    pub new_count: usize,
+    pub updated_count: usize,
+    pub skipped_count: usize,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub warnings: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ConversationRecord {
@@ -36,6 +67,10 @@ pub struct TargetState {
 pub struct BackupState {
     pub version: u32,
     pub targets: BTreeMap<String, TargetState>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_run: Option<LastRun>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub last_notifications: BTreeMap<String, DateTime<Utc>>,
 }
 
 impl BackupState {
@@ -44,6 +79,8 @@ impl BackupState {
             return Ok(Self {
                 version: 1,
                 targets: BTreeMap::new(),
+                last_run: None,
+                last_notifications: BTreeMap::new(),
             });
         }
         let raw = fs::read_to_string(path)
@@ -70,6 +107,31 @@ impl BackupState {
 
     pub fn target_mut(&mut self, target_name: &str) -> &mut TargetState {
         self.targets.entry(target_name.to_string()).or_default()
+    }
+
+    /// Returns true if `key` has not been notified within `cooldown_hours`, and records `now`.
+    pub fn check_and_mark_notification(
+        &mut self,
+        key: &str,
+        now: DateTime<Utc>,
+        cooldown_hours: i64,
+    ) -> bool {
+        if let Some(prev) = self.last_notifications.get(key) {
+            if now.signed_duration_since(*prev) < Duration::hours(cooldown_hours) {
+                return false;
+            }
+        }
+        self.last_notifications.insert(key.to_string(), now);
+        true
+    }
+
+    /// Total previously tracked conversations for a given harness across all targets.
+    pub fn tracked_count_for_harness(&self, harness: Harness) -> usize {
+        self.targets
+            .values()
+            .flat_map(|t| t.conversations.values())
+            .filter(|r| r.harness == harness)
+            .count()
     }
 }
 

@@ -13,7 +13,7 @@ use std::time::UNIX_EPOCH;
 use walkdir::WalkDir;
 
 use crate::config::{default_harness_path_string, expand_tilde};
-use crate::models::{Conversation, DiscoveredSource, Harness};
+use crate::models::{DiscoveredSource, Harness, ParseOutcome};
 use crate::sanitize::{
     project_name_from_path, NON_PROJECT_HOME_DIRS, WORKSPACE_CONTAINERS,
 };
@@ -31,7 +31,7 @@ pub trait HarnessAdapter: Send + Sync {
 
     fn discover(&self, root: &Path) -> Result<Vec<DiscoveredSource>>;
 
-    fn parse(&self, source: &DiscoveredSource) -> Result<Option<Conversation>>;
+    fn parse(&self, source: &DiscoveredSource) -> Result<ParseOutcome>;
 }
 
 pub fn all_adapters() -> Vec<Box<dyn HarnessAdapter>> {

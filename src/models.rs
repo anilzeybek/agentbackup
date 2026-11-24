@@ -173,6 +173,17 @@ pub fn push_unique_model(models: &mut Vec<String>, candidate: &str) {
     }
 }
 
+/// Result of parsing a discovered harness source.
+/// Distinguishes intentionally filtered sessions (subagents, empty sessions)
+/// from unrecognized schemas so `agentbackup` can warn on harness format drift
+/// without false positives.
+#[derive(Debug, Clone)]
+pub enum ParseOutcome {
+    Conversation(Conversation),
+    Skipped,
+    UnrecognizedSchema(String),
+}
+
 /// A discovered conversation source on disk prior to full parsing.
 #[derive(Debug, Clone)]
 pub struct DiscoveredSource {

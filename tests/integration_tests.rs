@@ -1,9 +1,14 @@
 use agentbackup::config::{Config, HarnessesConfig, OutputFormat, TargetConfig, TargetType};
-use agentbackup::{init_config_interactive, run_backup, scan_harnesses};
+use agentbackup::schedule::ScheduleInfo;
+use agentbackup::state::{BackupState, RunStatus};
+use agentbackup::{
+    format_status_report, init_config_interactive, record_run_error, run_backup, scan_harnesses,
+};
+use chrono::{Duration, Utc};
 use rusqlite::Connection;
 use std::fs;
 use std::io::{Cursor, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use tempfile::TempDir;
 
 fn setup_antigravity_fixture(root: &Path) {
@@ -569,6 +574,7 @@ fn scan_and_per_chat_markdown_backup_with_metadata_incremental_and_retention() {
 
     let cfg = Config {
         redact_secrets: true,
+        notify: false,
         harnesses: harnesses.clone(),
         targets: vec![TargetConfig {
             name: "local".to_string(),
@@ -590,16 +596,22 @@ fn scan_and_per_chat_markdown_backup_with_metadata_incremental_and_retention() {
     assert!(ag_summary.est_export_bytes < 2_500);
 
     // 2. Dry-run previews 6 new conversations without creating files or state
-    let dry_reports = run_backup(&cfg, &state_path, true).unwrap();
-    assert_eq!(dry_reports[0].stats.new_count, 6);
+    let dry_outcome = run_backup(&cfg, &state_path, true).unwrap();
+    assert_eq!(dry_outcome.reports[0].stats.new_count, 6);
+    assert!(dry_outcome.warnings.is_empty());
     assert!(!state_path.exists());
     assert!(!backup_dir.join("INDEX.md").exists());
 
-    // 3. First real run writes 6 conversation files + INDEX.md
-    let reports = run_backup(&cfg, &state_path, false).unwrap();
-    assert_eq!(reports[0].stats.new_count, 6);
-    assert_eq!(reports[0].stats.updated_count, 0);
-    assert_eq!(reports[0].stats.skipped_count, 0);
+    // 3. First real run writes 6 conversation files + INDEX.md with zero false-positive drift warnings
+    let outcome = run_backup(&cfg, &state_path, false).unwrap();
+    assert!(
+        outcome.warnings.is_empty(),
+        "Known subagents must not trigger drift warnings: {:?}",
+        outcome.warnings
+    );
+    assert_eq!(outcome.reports[0].stats.new_count, 6);
+    assert_eq!(outcome.reports[0].stats.updated_count, 0);
+    assert_eq!(outcome.reports[0].stats.skipped_count, 0);
     assert!(backup_dir.join("INDEX.md").is_file());
 
     // Verify Antigravity + Claude Code markdown metadata, sanitization, exact timestamps, and multi-model headings
@@ -661,15 +673,15 @@ fn scan_and_per_chat_markdown_backup_with_metadata_incremental_and_retention() {
 
     // 4. Second run with no changes skips all 6 conversations
     let second = run_backup(&cfg, &state_path, false).unwrap();
-    assert_eq!(second[0].stats.new_count, 0);
-    assert_eq!(second[0].stats.updated_count, 0);
-    assert_eq!(second[0].stats.skipped_count, 6);
+    assert_eq!(second.reports[0].stats.new_count, 0);
+    assert_eq!(second.reports[0].stats.updated_count, 0);
+    assert_eq!(second.reports[0].stats.skipped_count, 6);
 
     // 5. Never-delete guarantee: delete Claude Code local source, re-run, verify backup file & INDEX retain it
     let cc_root = Path::new(harnesses.claude_code.as_ref().unwrap());
     fs::remove_dir_all(cc_root).unwrap();
     let after_delete = run_backup(&cfg, &state_path, false).unwrap();
-    assert_eq!(after_delete[0].stats.total_tracked, 6);
+    assert_eq!(after_delete.reports[0].stats.total_tracked, 6);
     let still_has_cc = fs::read_dir(&cc_dir)
         .unwrap()
         .flatten()
@@ -688,6 +700,7 @@ fn missing_target_directory_returns_clear_error_without_creating_it() {
 
     let cfg = Config {
         redact_secrets: true,
+        notify: false,
         harnesses,
         targets: vec![TargetConfig {
             name: "local".to_string(),
@@ -718,6 +731,7 @@ fn txt_and_json_formats_include_full_metadata_and_preserve_deleted_sessions() {
 
     let cfg = Config {
         redact_secrets: true,
+        notify: false,
         harnesses: harnesses.clone(),
         targets: vec![
             TargetConfig {
@@ -735,8 +749,8 @@ fn txt_and_json_formats_include_full_metadata_and_preserve_deleted_sessions() {
         ],
     };
 
-    let reports = run_backup(&cfg, &state_path, false).unwrap();
-    assert_eq!(reports.len(), 2);
+    let outcome = run_backup(&cfg, &state_path, false).unwrap();
+    assert_eq!(outcome.reports.len(), 2);
     assert!(txt_dir.join("INDEX.txt").is_file());
     assert!(json_dir.join("index.json").is_file());
 
@@ -838,8 +852,8 @@ fn txt_and_json_formats_include_full_metadata_and_preserve_deleted_sessions() {
     .unwrap();
 
     let after = run_backup(&cfg, &state_path, false).unwrap();
-    assert_eq!(after[0].stats.updated_count, 1);
-    assert_eq!(after[0].stats.total_tracked, 6);
+    assert_eq!(after.reports[0].stats.updated_count, 1);
+    assert_eq!(after.reports[0].stats.total_tracked, 6);
 
     let still_has_cc_txt = fs::read_dir(&txt_cc_dir)
         .unwrap()
@@ -866,4 +880,90 @@ fn init_wizard_rejects_missing_path_then_saves_valid_config() {
     assert!(cfg_path.is_file());
     assert_eq!(cfg.targets.len(), 1);
     assert_eq!(cfg.targets[0].format, OutputFormat::Txt);
+}
+
+#[test]
+fn detects_schema_drift_records_status_and_rate_limits_notifications() {
+    let tmp = TempDir::new().unwrap();
+    let ag_root = tmp.path().join("antigravity");
+    let backup_dir = tmp.path().join("backups");
+    fs::create_dir_all(&backup_dir).unwrap();
+    let cfg_path = tmp.path().join("config.toml");
+    let state_path = tmp.path().join("state.json");
+
+    // Create a transcript using a completely unknown future schema
+    let weird_logs = ag_root
+        .join("future-uuid-0001")
+        .join(".system_generated")
+        .join("logs");
+    fs::create_dir_all(&weird_logs).unwrap();
+    fs::write(
+        weird_logs.join("transcript.jsonl"),
+        "{\"v2_event\":\"human_turn\",\"body\":\"hello\"}\n{\"v2_event\":\"ai_turn\",\"body\":\"hi\"}\n",
+    )
+    .unwrap();
+
+    let cfg = Config {
+        redact_secrets: true,
+        notify: false,
+        harnesses: HarnessesConfig {
+            antigravity: Some(ag_root.display().to_string()),
+            claude_code: None,
+            codex: None,
+            opencode: None,
+        },
+        targets: vec![TargetConfig {
+            name: "local".to_string(),
+            target_type: TargetType::Local,
+            path: backup_dir.display().to_string(),
+            format: OutputFormat::Markdown,
+        }],
+    };
+    cfg.save_to(&cfg_path).unwrap();
+
+    let outcome = run_backup(&cfg, &state_path, false).unwrap();
+    assert_eq!(outcome.warnings.len(), 1);
+    assert!(outcome.warnings[0].contains("antigravity"));
+    assert!(outcome.warnings[0].contains("unrecognized format"));
+
+    let state = BackupState::load_or_default(&state_path).unwrap();
+    let last_run = state.last_run.as_ref().unwrap();
+    assert_eq!(last_run.status, RunStatus::Warning);
+    assert_eq!(last_run.warnings.len(), 1);
+
+    // Verify `agentbackup status` displays the warning cleanly
+    let fake_sched = ScheduleInfo {
+        supported: true,
+        installed: true,
+        loaded: true,
+        interval_seconds: Some(3600),
+        plist_path: PathBuf::from("/tmp/com.agentbackup.sync.plist"),
+        log_path: PathBuf::from("/tmp/launchd.log"),
+        recent_log_lines: vec!["[2026-11-24 18:00:00 UTC] Backup finished".to_string()],
+    };
+    let status_text = format_status_report(&cfg_path, &state_path, &fake_sched).unwrap();
+    assert!(status_text.contains("Status:   WARNING"));
+    assert!(status_text.contains("unrecognized format"));
+    assert!(status_text.contains("installed (every 3600s, loaded: yes)"));
+
+    // Verify error recording updates status to ERROR
+    record_run_error(&state_path, "Target 'local' path does not exist").unwrap();
+    let err_status = format_status_report(&cfg_path, &state_path, &fake_sched).unwrap();
+    assert!(err_status.contains("Status:   ERROR"));
+    assert!(err_status.contains("Target 'local' path does not exist"));
+
+    // Verify notification cooldown (24h deduplication)
+    let mut st = BackupState::load_or_default(&state_path).unwrap();
+    let t0 = Utc::now();
+    assert!(st.check_and_mark_notification("warning:antigravity", t0, 24));
+    assert!(!st.check_and_mark_notification(
+        "warning:antigravity",
+        t0 + Duration::hours(2),
+        24
+    ));
+    assert!(st.check_and_mark_notification(
+        "warning:antigravity",
+        t0 + Duration::hours(25),
+        24
+    ));
 }

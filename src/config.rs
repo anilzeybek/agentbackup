@@ -132,6 +132,8 @@ fn default_true() -> bool {
 pub struct Config {
     #[serde(default = "default_true")]
     pub redact_secrets: bool,
+    #[serde(default = "default_true")]
+    pub notify: bool,
     #[serde(default)]
     pub harnesses: HarnessesConfig,
     #[serde(default)]
@@ -142,6 +144,7 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             redact_secrets: true,
+            notify: true,
             harnesses: HarnessesConfig::default(),
             targets: Vec::new(),
         }

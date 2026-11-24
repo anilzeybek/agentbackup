@@ -8,7 +8,8 @@ use walkdir::WalkDir;
 
 use crate::adapters::{file_mtime_and_size, HarnessAdapter};
 use crate::models::{
-    parse_rfc3339, push_unique_model, Conversation, DiscoveredSource, Harness, Message, Role,
+    parse_rfc3339, push_unique_model, Conversation, DiscoveredSource, Harness, Message,
+    ParseOutcome, Role,
 };
 use crate::sanitize::project_name_from_path;
 
@@ -59,7 +60,7 @@ impl HarnessAdapter for CodexAdapter {
         Ok(sources)
     }
 
-    fn parse(&self, source: &DiscoveredSource) -> Result<Option<Conversation>> {
+    fn parse(&self, source: &DiscoveredSource) -> Result<ParseOutcome> {
         let file = File::open(&source.path).with_context(|| {
             format!("Failed to open Codex session {}", source.path.display())
         })?;
@@ -88,7 +89,7 @@ impl HarnessAdapter for CodexAdapter {
 fn parse_codex_reader<R: BufRead>(
     reader: R,
     source: &DiscoveredSource,
-) -> Result<Option<Conversation>> {
+) -> Result<ParseOutcome> {
     let mut response_messages: Vec<Message> = Vec::new();
     let mut event_messages: Vec<Message> = Vec::new();
     let mut models: Vec<String> = Vec::new();
@@ -99,6 +100,8 @@ fn parse_codex_reader<R: BufRead>(
     let mut session_id = source.raw_id.clone();
     let mut created_at: Option<DateTime<Utc>> = None;
     let mut updated_at: Option<DateTime<Utc>> = None;
+    let mut json_lines = 0usize;
+    let mut recognized_events = 0usize;
 
     for line in reader.lines() {
         let line = match line {
@@ -112,6 +115,7 @@ fn parse_codex_reader<R: BufRead>(
         let Ok(val) = serde_json::from_str::<Value>(trimmed) else {
             continue;
         };
+        json_lines += 1;
 
         let ts = val
             .get("timestamp")
@@ -121,6 +125,7 @@ fn parse_codex_reader<R: BufRead>(
         let line_type = val.get("type").and_then(|v| v.as_str()).unwrap_or("");
         match line_type {
             "session_meta" => {
+                recognized_events += 1;
                 if let Some(payload) = val.get("payload") {
                     // Skip Codex subagent sessions
                     if payload
@@ -134,7 +139,7 @@ fn parse_codex_reader<R: BufRead>(
                             .map(|s| s.eq_ignore_ascii_case("subagent"))
                             .unwrap_or(false)
                     {
-                        return Ok(None);
+                        return Ok(ParseOutcome::Skipped);
                     }
                     if let Some(id) = payload.get("id").and_then(|v| v.as_str()) {
                         if !id.trim().is_empty() {
@@ -193,6 +198,7 @@ fn parse_codex_reader<R: BufRead>(
                 }
             }
             "turn_context" => {
+                recognized_events += 1;
                 if let Some(payload) = val.get("payload") {
                     if cwd.is_none() {
                         if let Some(c) = payload
@@ -228,6 +234,7 @@ fn parse_codex_reader<R: BufRead>(
                 }
             }
             "response_item" => {
+                recognized_events += 1;
                 let Some(payload) = val.get("payload") else {
                     continue;
                 };
@@ -271,6 +278,7 @@ fn parse_codex_reader<R: BufRead>(
                 });
             }
             "event_msg" => {
+                recognized_events += 1;
                 let Some(payload) = val.get("payload") else {
                     continue;
                 };
@@ -312,6 +320,7 @@ fn parse_codex_reader<R: BufRead>(
             }
             // Legacy top-level message lines
             "message" => {
+                recognized_events += 1;
                 let role = match val.get("role").and_then(|v| v.as_str()) {
                     Some("user") => Role::User,
                     Some("assistant") => Role::Assistant,
@@ -378,7 +387,14 @@ fn parse_codex_reader<R: BufRead>(
     };
 
     if !messages.iter().any(|m| m.role == Role::User) {
-        return Ok(None);
+        if json_lines > 0 && recognized_events == 0 {
+            return Ok(ParseOutcome::UnrecognizedSchema(format!(
+                "{} had {} JSON lines with no recognized Codex event types",
+                source.path.display(),
+                json_lines
+            )));
+        }
+        return Ok(ParseOutcome::Skipped);
     }
 
     let project = cwd
@@ -402,7 +418,7 @@ fn parse_codex_reader<R: BufRead>(
         messages,
     };
     conv.refresh_derived_fields();
-    Ok(Some(conv))
+    Ok(ParseOutcome::Conversation(conv))
 }
 
 fn update_timestamps(

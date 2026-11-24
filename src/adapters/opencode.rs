@@ -10,7 +10,7 @@ use tempfile::TempDir;
 use crate::adapters::{file_mtime_and_size, HarnessAdapter};
 use crate::models::{
     datetime_from_epoch_auto, push_unique_model, Conversation, DiscoveredSource, Harness, Message,
-    Role,
+    ParseOutcome, Role,
 };
 use crate::sanitize::project_name_from_path;
 
@@ -32,11 +32,15 @@ impl HarnessAdapter for OpenCodeAdapter {
         // 1. SQLite v1.2+ (<root>/opencode.db)
         let db_path = root.join("opencode.db");
         if db_path.is_file() {
-            if let Ok(sqlite_sources) = discover_sqlite_sessions(&db_path) {
-                for src in sqlite_sources {
-                    seen_ids.insert(src.raw_id.clone());
-                    sources.push(src);
-                }
+            let sqlite_sources = discover_sqlite_sessions(&db_path).with_context(|| {
+                format!(
+                    "Failed to query OpenCode SQLite schema at {} (database schema may have changed)",
+                    db_path.display()
+                )
+            })?;
+            for src in sqlite_sources {
+                seen_ids.insert(src.raw_id.clone());
+                sources.push(src);
             }
         }
 
@@ -52,14 +56,14 @@ impl HarnessAdapter for OpenCodeAdapter {
         Ok(sources)
     }
 
-    fn parse(&self, source: &DiscoveredSource) -> Result<Option<Conversation>> {
+    fn parse(&self, source: &DiscoveredSource) -> Result<ParseOutcome> {
         let locator = source.locator.as_deref().unwrap_or("");
         if let Some(session_id) = locator.strip_prefix("sqlite:") {
             parse_sqlite_session(&source.path, session_id, source)
         } else if let Some(session_file) = locator.strip_prefix("legacy:") {
             parse_legacy_session(Path::new(session_file), source)
         } else {
-            Ok(None)
+            Ok(ParseOutcome::Skipped)
         }
     }
 }
@@ -204,7 +208,7 @@ fn parse_sqlite_session(
     db_path: &Path,
     session_id: &str,
     source: &DiscoveredSource,
-) -> Result<Option<Conversation>> {
+) -> Result<ParseOutcome> {
     let (conn, _tmp) = open_sqlite_readonly(db_path)?;
 
     let has_directory = table_has_column(&conn, "session", "directory");
@@ -388,7 +392,7 @@ fn parse_sqlite_session(
     }
 
     if !messages.iter().any(|m| m.role == Role::User) {
-        return Ok(None);
+        return Ok(ParseOutcome::Skipped);
     }
 
     let project = workspace
@@ -412,7 +416,7 @@ fn parse_sqlite_session(
         messages,
     };
     conv.refresh_derived_fields();
-    Ok(Some(conv))
+    Ok(ParseOutcome::Conversation(conv))
 }
 
 fn discover_legacy_sessions(
@@ -528,7 +532,7 @@ fn discover_legacy_sessions(
 fn parse_legacy_session(
     session_file: &Path,
     source: &DiscoveredSource,
-) -> Result<Option<Conversation>> {
+) -> Result<ParseOutcome> {
     let storage_dir = session_file
         .parent()
         .and_then(|p| p.parent())
@@ -571,7 +575,7 @@ fn parse_legacy_session(
 
     let msg_dir = storage_dir.join("message").join(session_id);
     if !msg_dir.is_dir() {
-        return Ok(None);
+        return Ok(ParseOutcome::Skipped);
     }
 
     let mut raw_msgs: Vec<(i64, String, Value)> = Vec::new();
@@ -687,7 +691,7 @@ fn parse_legacy_session(
     }
 
     if !messages.iter().any(|m| m.role == Role::User) {
-        return Ok(None);
+        return Ok(ParseOutcome::Skipped);
     }
 
     let project = workspace
@@ -711,7 +715,7 @@ fn parse_legacy_session(
         messages,
     };
     conv.refresh_derived_fields();
-    Ok(Some(conv))
+    Ok(ParseOutcome::Conversation(conv))
 }
 
 fn extract_opencode_part(part: &Value, is_user: bool) -> Option<String> {

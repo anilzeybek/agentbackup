@@ -1,10 +1,14 @@
 use anyhow::{bail, Result};
+use chrono::Utc;
 use clap::Parser;
 use std::io;
 
 use agentbackup::cli::{Cli, Commands, ScheduleAction};
 use agentbackup::config::{default_config_path, default_state_path, Config};
-use agentbackup::{format_bytes, init_config_interactive, run_backup, scan_harnesses, schedule};
+use agentbackup::{
+    format_bytes, format_status_report, init_config_interactive, notify_issues_if_needed,
+    record_run_error, run_backup, scan_harnesses, schedule,
+};
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
@@ -78,32 +82,62 @@ fn main() -> Result<()> {
                 );
             }
             let cfg = Config::load_from(&config_path)?;
-            let reports = run_backup(&cfg, &state_path, dry_run)?;
+            let now_str = Utc::now().format("%Y-%m-%d %H:%M:%S UTC");
 
-            if dry_run {
-                println!("[dry-run] No files or state were modified.\n");
-            }
+            match run_backup(&cfg, &state_path, dry_run) {
+                Ok(outcome) => {
+                    if dry_run {
+                        println!("[dry-run] No files or state were modified.\n");
+                    } else {
+                        println!("[{}] Backup finished", now_str);
+                    }
 
-            for report in reports {
-                println!(
-                    "Target '{}' ({}, {}):",
-                    report.name, report.format, report.path
-                );
-                println!(
-                    "  new: {}, updated: {}, skipped: {}, tracked: {} (wrote {} files, {})",
-                    report.stats.new_count,
-                    report.stats.updated_count,
-                    report.stats.skipped_count,
-                    report.stats.total_tracked,
-                    report.stats.files_written,
-                    format_bytes(report.stats.bytes_written)
-                );
+                    for report in outcome.reports {
+                        println!(
+                            "Target '{}' ({}, {}):",
+                            report.name, report.format, report.path
+                        );
+                        println!(
+                            "  new: {}, updated: {}, skipped: {}, tracked: {} (wrote {} files, {})",
+                            report.stats.new_count,
+                            report.stats.updated_count,
+                            report.stats.skipped_count,
+                            report.stats.total_tracked,
+                            report.stats.files_written,
+                            format_bytes(report.stats.bytes_written)
+                        );
+                    }
+
+                    if !outcome.warnings.is_empty() {
+                        eprintln!("\nWarnings:");
+                        for w in &outcome.warnings {
+                            eprintln!("  - {}", w);
+                        }
+                        if !dry_run {
+                            notify_issues_if_needed(&cfg, &state_path, &outcome.warnings, None);
+                        }
+                    }
+                }
+                Err(err) => {
+                    let msg = err.to_string();
+                    eprintln!("[{}] Backup failed: {}", now_str, msg);
+                    if !dry_run {
+                        let _ = record_run_error(&state_path, &msg);
+                        notify_issues_if_needed(&cfg, &state_path, &[], Some(&msg));
+                    }
+                    return Err(err);
+                }
             }
+        }
+
+        Commands::Status => {
+            let sched = schedule::inspect();
+            let report = format_status_report(&config_path, &state_path, &sched)?;
+            print!("{}", report);
         }
 
         Commands::Schedule { action } => match action {
             ScheduleAction::Install { every } => schedule::install(&every)?,
-            ScheduleAction::Status => schedule::status()?,
             ScheduleAction::Remove => schedule::remove()?,
         },
     }

@@ -7,7 +7,8 @@ use std::path::Path;
 
 use crate::adapters::{file_mtime_and_size, HarnessAdapter};
 use crate::models::{
-    parse_rfc3339, push_unique_model, Conversation, DiscoveredSource, Harness, Message, Role,
+    parse_rfc3339, push_unique_model, Conversation, DiscoveredSource, Harness, Message,
+    ParseOutcome, Role,
 };
 use crate::sanitize::{
     project_name_from_path, sanitize_project_name, NON_PROJECT_HOME_DIRS, WORKSPACE_CONTAINERS,
@@ -71,7 +72,7 @@ impl HarnessAdapter for ClaudeCodeAdapter {
         Ok(sources)
     }
 
-    fn parse(&self, source: &DiscoveredSource) -> Result<Option<Conversation>> {
+    fn parse(&self, source: &DiscoveredSource) -> Result<ParseOutcome> {
         let file = File::open(&source.path).with_context(|| {
             format!(
                 "Failed to open Claude Code transcript {}",
@@ -89,6 +90,8 @@ impl HarnessAdapter for ClaudeCodeAdapter {
         let mut created_at: Option<DateTime<Utc>> = None;
         let mut updated_at: Option<DateTime<Utc>> = None;
         let mut last_assistant_msg_id: Option<String> = None;
+        let mut json_lines = 0usize;
+        let mut recognized_events = 0usize;
 
         for line in reader.lines() {
             let line = match line {
@@ -102,6 +105,7 @@ impl HarnessAdapter for ClaudeCodeAdapter {
             let Ok(val) = serde_json::from_str::<Value>(trimmed) else {
                 continue;
             };
+            json_lines += 1;
 
             if val
                 .get("isSidechain")
@@ -109,6 +113,7 @@ impl HarnessAdapter for ClaudeCodeAdapter {
                 .unwrap_or(false)
                 || val.get("isMeta").and_then(|v| v.as_bool()).unwrap_or(false)
             {
+                recognized_events += 1;
                 continue;
             }
 
@@ -152,6 +157,7 @@ impl HarnessAdapter for ClaudeCodeAdapter {
             let line_type = val.get("type").and_then(|v| v.as_str()).unwrap_or("");
             match line_type {
                 "summary" => {
+                    recognized_events += 1;
                     if let Some(s) = val.get("summary").and_then(|v| v.as_str()) {
                         let s = s.trim();
                         if !s.is_empty() {
@@ -160,6 +166,7 @@ impl HarnessAdapter for ClaudeCodeAdapter {
                     }
                 }
                 "user" => {
+                    recognized_events += 1;
                     last_assistant_msg_id = None;
                     let Some(msg) = val.get("message") else {
                         continue;
@@ -179,6 +186,7 @@ impl HarnessAdapter for ClaudeCodeAdapter {
                     });
                 }
                 "assistant" => {
+                    recognized_events += 1;
                     let Some(msg) = val.get("message") else {
                         continue;
                     };
@@ -226,12 +234,22 @@ impl HarnessAdapter for ClaudeCodeAdapter {
                         });
                     }
                 }
+                "system" | "progress" | "file-history-snapshot" | "queue-operation" => {
+                    recognized_events += 1;
+                }
                 _ => {}
             }
         }
 
         if !messages.iter().any(|m| m.role == Role::User) {
-            return Ok(None);
+            if json_lines > 0 && recognized_events == 0 {
+                return Ok(ParseOutcome::UnrecognizedSchema(format!(
+                    "{} had {} JSON lines with no recognized Claude Code event types",
+                    source.path.display(),
+                    json_lines
+                )));
+            }
+            return Ok(ParseOutcome::Skipped);
         }
 
         let project = cwd
@@ -263,7 +281,7 @@ impl HarnessAdapter for ClaudeCodeAdapter {
             messages,
         };
         conv.refresh_derived_fields();
-        Ok(Some(conv))
+        Ok(ParseOutcome::Conversation(conv))
     }
 }
 

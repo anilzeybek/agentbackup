@@ -26,6 +26,9 @@ pub enum Commands {
         dry_run: bool,
     },
 
+    /// Show backup health summary, target checks, drift warnings, and background schedule status
+    Status,
+
     /// Manage optional macOS launchd background backup schedule
     Schedule {
         #[command(subcommand)]
@@ -41,9 +44,6 @@ pub enum ScheduleAction {
         #[arg(long, default_value = "1h")]
         every: String,
     },
-
-    /// Show current schedule status and recent log output
-    Status,
 
     /// Remove the installed macOS launchd schedule
     Remove,

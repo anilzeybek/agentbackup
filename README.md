@@ -38,9 +38,11 @@ agentbackup scan
 agentbackup run
 agentbackup run --dry-run   # preview without modifying files or state
 
-# 4. Optional: install a macOS launchd background schedule
+# 4. Check backup health, warnings, and background schedule status
+agentbackup status
+
+# 5. Optional: install a macOS launchd background schedule
 agentbackup schedule install --every 1h
-agentbackup schedule status
 agentbackup schedule remove
 ```
 
@@ -50,6 +52,7 @@ Configuration lives at `~/.config/agentbackup/config.toml` (state at `~/.config/
 
 ```toml
 redact_secrets = true
+notify = true   # native macOS notifications on errors & schema drift warnings (max once/24h per issue)
 
 [harnesses]
 antigravity = "~/.gemini/antigravity/brain"
@@ -70,3 +73,4 @@ Each conversation is written under `<harness>/<project>/<YYYY-MM-DD>_<slug>_<sho
 - **Strict target path check:** If a target `path` does not exist on disk, `agentbackup` exits with an error instead of creating it (preventing silent writes into unmounted sync folders).
 - **Never-delete retention:** If a harness prunes old local sessions (such as Claude Code's 30-day default cleanup), previously backed-up conversations remain preserved along with their entries in the top-level `INDEX`.
 - **Blob & secret hygiene:** Tool calls, tool outputs, thinking traces, screenshots, and base64 payloads are excluded/replaced with lightweight placeholders, and common API keys/tokens/PEM keys are redacted by default.
+- **Drift alerts & health summary:** Healthy background runs stay silent; if a target disappears or a harness changes its transcript schema, `agentbackup` records the warning/error for `agentbackup status` and sends a rate-limited macOS notification.
