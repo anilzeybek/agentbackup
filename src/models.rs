@@ -11,6 +11,8 @@ pub enum Harness {
     ClaudeCode,
     Codex,
     OpenCode,
+    Pi,
+    DeepSeek,
 }
 
 impl Harness {
@@ -20,6 +22,8 @@ impl Harness {
             Harness::ClaudeCode => "claude-code",
             Harness::Codex => "codex",
             Harness::OpenCode => "opencode",
+            Harness::Pi => "pi",
+            Harness::DeepSeek => "deepseek",
         }
     }
 
@@ -29,6 +33,8 @@ impl Harness {
             Harness::ClaudeCode,
             Harness::Codex,
             Harness::OpenCode,
+            Harness::Pi,
+            Harness::DeepSeek,
         ]
     }
 }
@@ -218,4 +224,20 @@ pub fn parse_rfc3339(s: &str) -> Option<DateTime<Utc>> {
     DateTime::parse_from_rfc3339(s)
         .ok()
         .map(|dt| dt.with_timezone(&Utc))
+}
+
+/// Parse a timestamp from a JSON value that may be an RFC3339 string or Unix epoch (s or ms).
+pub fn parse_json_timestamp(val: &serde_json::Value) -> Option<DateTime<Utc>> {
+    if let Some(s) = val.as_str() {
+        return parse_rfc3339(s);
+    }
+    if let Some(n) = val.as_i64() {
+        return datetime_from_epoch_auto(n);
+    }
+    if let Some(f) = val.as_f64() {
+        if f > 0.0 {
+            return datetime_from_epoch_auto(f as i64);
+        }
+    }
+    None
 }

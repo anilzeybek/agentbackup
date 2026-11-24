@@ -2,7 +2,7 @@
 name = "agentbackup"
 version = "0.1.0"
 edition = "2021"
-description = "Cross-harness AI coding agent conversation backup CLI (Antigravity, Claude Code, Codex CLI, OpenCode)"
+description = "Cross-harness AI coding agent conversation backup CLI (Antigravity, Claude Code, Codex CLI, OpenCode, Pi, DeepSeek Harness)"
 license = "MIT"
 
 [dependencies]

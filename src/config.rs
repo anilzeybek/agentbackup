@@ -60,6 +60,14 @@ impl fmt::Display for OutputFormat {
     }
 }
 
+fn default_pi_opt() -> Option<String> {
+    Some(default_harness_path_string(Harness::Pi))
+}
+
+fn default_deepseek_opt() -> Option<String> {
+    Some(default_harness_path_string(Harness::DeepSeek))
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HarnessesConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -70,6 +78,13 @@ pub struct HarnessesConfig {
     pub codex: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub opencode: Option<String>,
+    #[serde(default = "default_pi_opt", skip_serializing_if = "Option::is_none")]
+    pub pi: Option<String>,
+    #[serde(
+        default = "default_deepseek_opt",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub deepseek: Option<String>,
 }
 
 impl Default for HarnessesConfig {
@@ -79,6 +94,8 @@ impl Default for HarnessesConfig {
             claude_code: Some(default_harness_path_string(Harness::ClaudeCode)),
             codex: Some(default_harness_path_string(Harness::Codex)),
             opencode: Some(default_harness_path_string(Harness::OpenCode)),
+            pi: Some(default_harness_path_string(Harness::Pi)),
+            deepseek: Some(default_harness_path_string(Harness::DeepSeek)),
         }
     }
 }
@@ -90,6 +107,8 @@ impl HarnessesConfig {
             Harness::ClaudeCode => self.claude_code.as_deref(),
             Harness::Codex => self.codex.as_deref(),
             Harness::OpenCode => self.opencode.as_deref(),
+            Harness::Pi => self.pi.as_deref(),
+            Harness::DeepSeek => self.deepseek.as_deref(),
         }?;
         let trimmed = raw.trim();
         if trimmed.is_empty() {
@@ -104,6 +123,8 @@ impl HarnessesConfig {
             Harness::ClaudeCode => self.claude_code.as_deref(),
             Harness::Codex => self.codex.as_deref(),
             Harness::OpenCode => self.opencode.as_deref(),
+            Harness::Pi => self.pi.as_deref(),
+            Harness::DeepSeek => self.deepseek.as_deref(),
         }
     }
 }
@@ -246,6 +267,27 @@ pub fn default_harness_path_string(harness: Harness) -> String {
                 }
             }
             "~/.local/share/opencode".to_string()
+        }
+        Harness::Pi => {
+            if let Ok(dir) = env::var("PI_CODING_AGENT_SESSION_DIR") {
+                if !dir.trim().is_empty() {
+                    return dir;
+                }
+            }
+            if let Ok(dir) = env::var("PI_CODING_AGENT_DIR") {
+                if !dir.trim().is_empty() {
+                    return PathBuf::from(dir).join("sessions").display().to_string();
+                }
+            }
+            "~/.pi/agent/sessions".to_string()
+        }
+        Harness::DeepSeek => {
+            if let Ok(dir) = env::var("DSH_HOME") {
+                if !dir.trim().is_empty() {
+                    return dir;
+                }
+            }
+            "~/.dsh".to_string()
         }
     }
 }

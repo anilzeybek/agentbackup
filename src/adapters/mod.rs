@@ -1,7 +1,9 @@
 pub mod antigravity;
 pub mod claude_code;
 pub mod codex;
+pub mod deepseek;
 pub mod opencode;
+pub mod pi;
 
 use anyhow::Result;
 use regex::Regex;
@@ -40,6 +42,8 @@ pub fn all_adapters() -> Vec<Box<dyn HarnessAdapter>> {
         Box::new(claude_code::ClaudeCodeAdapter),
         Box::new(codex::CodexAdapter),
         Box::new(opencode::OpenCodeAdapter),
+        Box::new(pi::PiAdapter),
+        Box::new(deepseek::DeepSeekAdapter),
     ]
 }
 
@@ -49,6 +53,8 @@ pub fn adapter_for(harness: Harness) -> Box<dyn HarnessAdapter> {
         Harness::ClaudeCode => Box::new(claude_code::ClaudeCodeAdapter),
         Harness::Codex => Box::new(codex::CodexAdapter),
         Harness::OpenCode => Box::new(opencode::OpenCodeAdapter),
+        Harness::Pi => Box::new(pi::PiAdapter),
+        Harness::DeepSeek => Box::new(deepseek::DeepSeekAdapter),
     }
 }
 

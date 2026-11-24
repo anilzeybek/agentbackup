@@ -547,21 +547,280 @@ fn setup_opencode_fixtures(root: &Path) {
     .unwrap();
 }
 
+fn setup_pi_fixture(root: &Path) {
+    let proj_dir = root.join("--Users-tester-workdir-pi-app--");
+    fs::create_dir_all(&proj_dir).unwrap();
+
+    // Tree-structured Pi session with:
+    // - header with cwd
+    // - model_change (claude-sonnet-4-6)
+    // - an abandoned branch (n_abandoned) that must NOT appear in the active branch export
+    // - active branch switching to claude-opus-4-6 + session_info title + tool_call skipped
+    let lines = [
+        serde_json::json!({
+            "type": "session",
+            "version": 3,
+            "id": "pi-sess-998877",
+            "timestamp": "2026-11-24T14:00:00Z",
+            "cwd": "/Users/tester/workdir/pi-app"
+        }),
+        serde_json::json!({
+            "type": "model_change",
+            "id": "n1",
+            "parentId": null,
+            "timestamp": "2026-11-24T14:00:01Z",
+            "provider": "anthropic",
+            "modelId": "claude-sonnet-4-6"
+        }),
+        serde_json::json!({
+            "type": "message",
+            "id": "n2",
+            "parentId": "n1",
+            "timestamp": "2026-11-24T14:00:05Z",
+            "message": {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "Build a tree walker for Pi sessions"},
+                    {"type": "image", "data": "AAAA"}
+                ]
+            }
+        }),
+        // Abandoned branch off n2 (should NOT appear in exported active branch!)
+        serde_json::json!({
+            "type": "message",
+            "id": "n_abandoned",
+            "parentId": "n2",
+            "timestamp": "2026-11-24T14:00:10Z",
+            "message": {
+                "role": "assistant",
+                "content": [{"type": "text", "text": "ABANDONED_BRANCH_REPLY"}]
+            }
+        }),
+        // Active branch continues from n2
+        serde_json::json!({
+            "type": "message",
+            "id": "n3",
+            "parentId": "n2",
+            "timestamp": "2026-11-24T14:00:20Z",
+            "message": {
+                "role": "assistant",
+                "content": [
+                    {"type": "thinking", "thinking": "PI_HIDDEN_THINKING"},
+                    {"type": "tool_call", "id": "tc1", "name": "read", "arguments": {"path": "main.rs"}},
+                    {"type": "text", "text": "Walking parentId backward from the active leaf extracts the canonical branch."}
+                ]
+            }
+        }),
+        serde_json::json!({
+            "type": "model_change",
+            "id": "n4",
+            "parentId": "n3",
+            "timestamp": "2026-11-24T14:00:30Z",
+            "provider": "anthropic",
+            "modelId": "claude-opus-4-6"
+        }),
+        serde_json::json!({
+            "type": "message",
+            "id": "n5",
+            "parentId": "n4",
+            "timestamp": "2026-11-24T14:00:45Z",
+            "message": {
+                "role": "assistant",
+                "content": [{"type": "text", "text": "Confirmed with Opus as well."}]
+            }
+        }),
+        serde_json::json!({
+            "type": "session_info",
+            "id": "n6",
+            "parentId": "n5",
+            "timestamp": "2026-11-24T14:00:50Z",
+            "name": "Pi tree walker implementation"
+        }),
+    ];
+
+    let mut body = String::new();
+    for line in lines {
+        body.push_str(&line.to_string());
+        body.push('\n');
+    }
+    fs::write(
+        proj_dir.join("2026-11-24T14-00-00-000Z_pi-sess-998877.jsonl"),
+        body,
+    )
+    .unwrap();
+}
+
+fn setup_deepseek_fixtures(root: &Path) {
+    // 1. Plain session.v4.jsonl with assistant/message, request/header, session/title
+    let s1_dir = root.join("sessions").join("dsh-plain-101");
+    fs::create_dir_all(&s1_dir).unwrap();
+    let s1_lines = [
+        serde_json::json!({
+            "type": "session/header",
+            "seq": 0,
+            "time": 1795442400000i64,
+            "data": {
+                "sessionId": "dsh-plain-101",
+                "cwd": "/Users/tester/workdir/dsh-app",
+                "cliVersion": "0.9.2",
+                "git": {"branch": "feat/cordis"}
+            }
+        }),
+        serde_json::json!({
+            "type": "user/message",
+            "seq": 1,
+            "time": 1795442405000i64,
+            "data": {
+                "content": [{"type": "text", "text": "Inspect Cordis plugin lifecycle"}],
+                "source": {"kind": "user"}
+            }
+        }),
+        serde_json::json!({
+            "type": "request/header",
+            "seq": 2,
+            "time": 1795442406000i64,
+            "data": {
+                "header": {"config": {"model": "deepseek-v4-pro"}}
+            }
+        }),
+        serde_json::json!({
+            "type": "tool/call",
+            "seq": 3,
+            "time": 1795442407000i64,
+            "data": {"name": "bash", "arguments": {"cmd": "ls"}}
+        }),
+        serde_json::json!({
+            "type": "assistant/message",
+            "seq": 4,
+            "time": 1795442415000i64,
+            "data": {
+                "content": [
+                    {"type": "reasoning", "text": "DSH_HIDDEN_REASONING"},
+                    {"type": "text", "text": "Cordis plugins register hooks via ctx.on during setup."}
+                ]
+            }
+        }),
+        serde_json::json!({
+            "type": "session/title",
+            "seq": 5,
+            "time": 1795442416000i64,
+            "data": {"title": "Cordis plugin lifecycle review"}
+        }),
+    ];
+    let mut s1_body = String::new();
+    for line in s1_lines {
+        s1_body.push_str(&line.to_string());
+        s1_body.push('\n');
+    }
+    fs::write(s1_dir.join("session.v4.jsonl"), s1_body).unwrap();
+
+    // 2. Zstd-compressed session.v4.jsonl.zstd under profiles/desktop/sessions/ using assistant/chunk streaming
+    let s2_dir = root
+        .join("profiles")
+        .join("desktop")
+        .join("sessions")
+        .join("dsh-zstd-202");
+    fs::create_dir_all(&s2_dir).unwrap();
+    let s2_lines = [
+        serde_json::json!({
+            "sessionId": "dsh-zstd-202",
+            "formatVersion": 4,
+            "cwd": "/Users/tester/workdir/dsh-app",
+            "createdAt": "2026-11-24T15:00:00Z"
+        }),
+        serde_json::json!({
+            "type": "user/message",
+            "seq": 1,
+            "time": 1795446005000i64,
+            "data": {
+                "content": [{"type": "text", "text": "Stream chunks over zstd"}],
+                "source": {"kind": "user"}
+            }
+        }),
+        serde_json::json!({
+            "type": "request/header",
+            "seq": 2,
+            "time": 1795446006000i64,
+            "data": {
+                "header": {"config": {"model": "deepseek-reasoner"}}
+            }
+        }),
+        serde_json::json!({
+            "type": "assistant/chunk",
+            "seq": 3,
+            "time": 1795446008000i64,
+            "data": {"turn": 1, "step": 1, "chunk": {"type": "reasoning", "text": "HIDDEN_CHUNK_THOUGHT"}}
+        }),
+        serde_json::json!({
+            "type": "assistant/chunk",
+            "seq": 4,
+            "time": 1795446009000i64,
+            "data": {"turn": 1, "step": 1, "chunk": {"type": "text", "text": "Chunks are "}}
+        }),
+        serde_json::json!({
+            "type": "assistant/chunk",
+            "seq": 5,
+            "time": 1795446010000i64,
+            "data": {"turn": 1, "step": 1, "chunk": {"type": "text", "text": "coalesced cleanly."}}
+        }),
+        serde_json::json!({
+            "type": "turn/end",
+            "seq": 6,
+            "time": 1795446011000i64,
+            "data": {"turn": 1}
+        }),
+    ];
+    let mut s2_raw = String::new();
+    for line in s2_lines {
+        s2_raw.push_str(&line.to_string());
+        s2_raw.push('\n');
+    }
+    let zst_file = fs::File::create(s2_dir.join("session.v4.jsonl.zstd")).unwrap();
+    let mut encoder = zstd::stream::write::Encoder::new(zst_file, 3).unwrap();
+    encoder.write_all(s2_raw.as_bytes()).unwrap();
+    encoder.finish().unwrap();
+
+    // 3. Subagent session with parentSessionId set (must be skipped)
+    let sub_dir = root.join("sessions").join("dsh-sub-303");
+    fs::create_dir_all(&sub_dir).unwrap();
+    fs::write(
+        sub_dir.join("session.v4.jsonl"),
+        format!(
+            "{}\n{}\n",
+            serde_json::json!({
+                "type": "session/header",
+                "data": {"sessionId": "dsh-sub-303", "parentSessionId": "dsh-plain-101", "cwd": "/Users/tester/workdir/dsh-app"}
+            }),
+            serde_json::json!({
+                "type": "user/message",
+                "data": {"content": [{"type": "text", "text": "Subagent task"}]}
+            })
+        ),
+    )
+    .unwrap();
+}
+
 fn build_fixture_harnesses(base: &Path) -> HarnessesConfig {
     let ag = base.join("antigravity");
     let cc = base.join("claude_code");
     let cx = base.join("codex");
     let oc = base.join("opencode");
+    let pi = base.join("pi");
+    let ds = base.join("deepseek");
     setup_antigravity_fixture(&ag);
     setup_claude_code_fixture(&cc);
     setup_codex_fixtures(&cx);
     setup_opencode_fixtures(&oc);
+    setup_pi_fixture(&pi);
+    setup_deepseek_fixtures(&ds);
 
     HarnessesConfig {
         antigravity: Some(ag.display().to_string()),
         claude_code: Some(cc.display().to_string()),
         codex: Some(cx.display().to_string()),
         opencode: Some(oc.display().to_string()),
+        pi: Some(pi.display().to_string()),
+        deepseek: Some(ds.display().to_string()),
     }
 }
 
@@ -585,10 +844,10 @@ fn scan_and_per_chat_markdown_backup_with_metadata_incremental_and_retention() {
         }],
     };
 
-    // 1. Scan reports all 6 sessions across all 4 harnesses and raw size > est export size
+    // 1. Scan reports all 9 sessions across all 6 harnesses and raw size > est export size
     let summaries = scan_harnesses(&cfg).unwrap();
     let total_sessions: usize = summaries.iter().map(|s| s.session_count).sum();
-    assert_eq!(total_sessions, 6);
+    assert_eq!(total_sessions, 9);
     let ag_summary = summaries
         .iter()
         .find(|s| s.harness.as_str() == "antigravity")
@@ -596,21 +855,21 @@ fn scan_and_per_chat_markdown_backup_with_metadata_incremental_and_retention() {
     assert!(ag_summary.raw_bytes > 60_000);
     assert!(ag_summary.est_export_bytes < 2_500);
 
-    // 2. Dry-run previews 6 new conversations without creating files or state
+    // 2. Dry-run previews 9 new conversations without creating files or state
     let dry_outcome = run_backup(&cfg, &state_path, true).unwrap();
-    assert_eq!(dry_outcome.reports[0].stats.new_count, 6);
+    assert_eq!(dry_outcome.reports[0].stats.new_count, 9);
     assert!(dry_outcome.warnings.is_empty());
     assert!(!state_path.exists());
     assert!(!backup_dir.join("INDEX.md").exists());
 
-    // 3. First real run writes 6 conversation files + INDEX.md with zero false-positive drift warnings
+    // 3. First real run writes 9 conversation files + INDEX.md with zero false-positive drift warnings
     let outcome = run_backup(&cfg, &state_path, false).unwrap();
     assert!(
         outcome.warnings.is_empty(),
         "Known subagents must not trigger drift warnings: {:?}",
         outcome.warnings
     );
-    assert_eq!(outcome.reports[0].stats.new_count, 6);
+    assert_eq!(outcome.reports[0].stats.new_count, 9);
     assert_eq!(outcome.reports[0].stats.updated_count, 0);
     assert_eq!(outcome.reports[0].stats.skipped_count, 0);
     assert!(backup_dir.join("INDEX.md").is_file());
@@ -664,6 +923,44 @@ fn scan_and_per_chat_markdown_backup_with_metadata_incremental_and_retention() {
     assert!(oc_md.contains("models:\n  - claude-opus-4-5\n"));
     assert!(oc_md.contains("message_count: 2"));
 
+    // Verify Pi markdown export: active branch only, multi-model headings, title, image omitted
+    let pi_dir = backup_dir.join("pi").join("pi-app");
+    let pi_entry = fs::read_dir(&pi_dir).unwrap().flatten().next().unwrap();
+    let pi_md = fs::read_to_string(pi_entry.path()).unwrap();
+    assert!(pi_md.contains("title: \"Pi tree walker implementation\""));
+    assert!(pi_md.contains("models:\n  - claude-sonnet-4-6\n  - claude-opus-4-6\n"));
+    assert!(pi_md.contains("## Assistant (claude-sonnet-4-6) · 2026-11-24 14:00:20 UTC"));
+    assert!(pi_md.contains("## Assistant (claude-opus-4-6) · 2026-11-24 14:00:45 UTC"));
+    assert!(pi_md.contains("[image omitted]"));
+    assert!(!pi_md.contains("ABANDONED_BRANCH_REPLY"));
+    assert!(!pi_md.contains("PI_HIDDEN_THINKING"));
+
+    // Verify DeepSeek Harness exports: plain v4 + zstd chunk-coalesced (subagent skipped)
+    let dsh_dir = backup_dir.join("deepseek").join("dsh-app");
+    let dsh_files: Vec<String> = fs::read_dir(&dsh_dir)
+        .unwrap()
+        .flatten()
+        .map(|e| fs::read_to_string(e.path()).unwrap())
+        .collect();
+    assert_eq!(dsh_files.len(), 2);
+    let dsh_plain = dsh_files
+        .iter()
+        .find(|c| c.contains("deepseek:dsh-plain-101"))
+        .unwrap();
+    assert!(dsh_plain.contains("title: \"Cordis plugin lifecycle review\""));
+    assert!(dsh_plain.contains("harness_version: \"0.9.2\""));
+    assert!(dsh_plain.contains("git_branch: \"feat/cordis\""));
+    assert!(dsh_plain.contains("models:\n  - deepseek-v4-pro\n"));
+    assert!(!dsh_plain.contains("DSH_HIDDEN_REASONING"));
+
+    let dsh_zst = dsh_files
+        .iter()
+        .find(|c| c.contains("deepseek:dsh-zstd-202"))
+        .unwrap();
+    assert!(dsh_zst.contains("models:\n  - deepseek-reasoner\n"));
+    assert!(dsh_zst.contains("Chunks are coalesced cleanly."));
+    assert!(!dsh_zst.contains("HIDDEN_CHUNK_THOUGHT"));
+
     // Verify INDEX.md includes date, harness, project, models, message count, and title
     let index_md = fs::read_to_string(backup_dir.join("INDEX.md")).unwrap();
     assert!(index_md.contains("| Date | Harness | Project | Models | Messages | Title | File |"));
@@ -671,18 +968,20 @@ fn scan_and_per_chat_markdown_backup_with_metadata_incremental_and_retention() {
     assert!(index_md.contains("claude-sonnet-4-5-20250929"));
     assert!(index_md.contains("gpt-5-codex"));
     assert!(index_md.contains("claude-opus-4-5"));
+    assert!(index_md.contains("claude-sonnet-4-6, claude-opus-4-6"));
+    assert!(index_md.contains("deepseek-v4-pro"));
 
-    // 4. Second run with no changes skips all 6 conversations
+    // 4. Second run with no changes skips all 9 conversations
     let second = run_backup(&cfg, &state_path, false).unwrap();
     assert_eq!(second.reports[0].stats.new_count, 0);
     assert_eq!(second.reports[0].stats.updated_count, 0);
-    assert_eq!(second.reports[0].stats.skipped_count, 6);
+    assert_eq!(second.reports[0].stats.skipped_count, 9);
 
     // 5. Never-delete guarantee: delete Claude Code local source, re-run, verify backup file & INDEX retain it
     let cc_root = Path::new(harnesses.claude_code.as_ref().unwrap());
     fs::remove_dir_all(cc_root).unwrap();
     let after_delete = run_backup(&cfg, &state_path, false).unwrap();
-    assert_eq!(after_delete.reports[0].stats.total_tracked, 6);
+    assert_eq!(after_delete.reports[0].stats.total_tracked, 9);
     let still_has_cc = fs::read_dir(&cc_dir)
         .unwrap()
         .flatten()
@@ -791,7 +1090,7 @@ fn txt_and_json_formats_include_full_metadata_and_preserve_deleted_sessions() {
     // Verify index.json includes models and message_count
     let idx_json: serde_json::Value =
         serde_json::from_str(&fs::read_to_string(json_dir.join("index.json")).unwrap()).unwrap();
-    assert_eq!(idx_json["total"], 6);
+    assert_eq!(idx_json["total"], 9);
     assert!(idx_json["conversations"]
         .as_array()
         .unwrap()
@@ -854,7 +1153,7 @@ fn txt_and_json_formats_include_full_metadata_and_preserve_deleted_sessions() {
 
     let after = run_backup(&cfg, &state_path, false).unwrap();
     assert_eq!(after.reports[0].stats.updated_count, 1);
-    assert_eq!(after.reports[0].stats.total_tracked, 6);
+    assert_eq!(after.reports[0].stats.total_tracked, 9);
 
     let still_has_cc_txt = fs::read_dir(&txt_cc_dir)
         .unwrap()
@@ -912,6 +1211,8 @@ fn detects_schema_drift_records_status_and_rate_limits_notifications() {
             claude_code: None,
             codex: None,
             opencode: None,
+            pi: None,
+            deepseek: None,
         },
         targets: vec![TargetConfig {
             name: "local".to_string(),

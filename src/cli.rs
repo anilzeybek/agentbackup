@@ -4,7 +4,7 @@ use clap::{Parser, Subcommand};
 #[command(
     name = "agentbackup",
     version,
-    about = "Cross-harness AI coding agent conversation backup CLI (Antigravity, Claude Code, Codex CLI, OpenCode)"
+    about = "Cross-harness AI coding agent conversation backup CLI (Antigravity, Claude Code, Codex CLI, OpenCode, Pi, DeepSeek Harness)"
 )]
 pub struct Cli {
     #[command(subcommand)]

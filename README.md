@@ -10,6 +10,8 @@ Fast, single-binary Rust CLI that discovers local conversation logs across AI co
 | **Claude Code** | `~/.claude/projects/<encoded-path>/<session-id>.jsonl` | JSONL |
 | **Codex CLI** | `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl` (and `.jsonl.zst`) | JSONL / Zstd |
 | **OpenCode** | `~/.local/share/opencode/opencode.db` (v1.2+) & `storage/` (v1.1) | SQLite / JSON |
+| **Pi** | `~/.pi/agent/sessions/--<encoded-path>--/*.jsonl` (`$PI_CODING_AGENT_DIR`) | JSONL (tree) |
+| **DeepSeek Harness** | `~/.dsh/sessions/**/session*.jsonl` & `.jsonl.zstd` (`$DSH_HOME`) | JSONL / Zstd |
 
 All harness adapters are strictly **read-only**.
 
@@ -46,6 +48,12 @@ agentbackup schedule install --every 1h
 agentbackup schedule remove
 ```
 
+## Workflow: Google Drive & AI Chat Apps
+
+A great way to use `agentbackup` is to point its backup target at a locally synced **Google Drive** folder (via Google Drive for Desktop) with a background schedule (`agentbackup schedule install --every 1h`).
+
+Because sessions are exported as lightweight, secret-redacted Markdown/text organized by `<harness>/<project>/` alongside a top-level `INDEX`, your coding-agent conversations stay continuously synced to Google Drive—where you can search and reference them directly from **Gemini**, **ChatGPT**, and **Claude** (web, desktop, and mobile apps) via their native Google Drive connectors. That lets you pull up past terminal/IDE context, recall earlier decisions, or continue thinking through a problem from your phone or browser.
+
 ## Configuration
 
 Configuration lives at `~/.config/agentbackup/config.toml` (state at `~/.config/agentbackup/state.json`):
@@ -59,6 +67,8 @@ antigravity = "~/.gemini/antigravity/brain"
 claude_code = "~/.claude/projects"
 codex = "~/.codex/sessions"
 opencode = "~/.local/share/opencode"
+pi = "~/.pi/agent/sessions"
+deepseek = "~/.dsh"
 
 [[targets]]
 name = "local"
