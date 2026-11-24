@@ -933,18 +933,20 @@ fn detects_schema_drift_records_status_and_rate_limits_notifications() {
 
     // Verify `agentbackup status` displays the warning cleanly
     let fake_sched = ScheduleInfo {
+        backend: "Linux systemd --user".to_string(),
         supported: true,
         installed: true,
         loaded: true,
         interval_seconds: Some(3600),
-        plist_path: PathBuf::from("/tmp/com.agentbackup.sync.plist"),
-        log_path: PathBuf::from("/tmp/launchd.log"),
+        config_path: Some(PathBuf::from("/tmp/agentbackup.timer")),
+        log_path: PathBuf::from("/tmp/schedule.log"),
         recent_log_lines: vec!["[2026-11-24 18:00:00 UTC] Backup finished".to_string()],
     };
     let status_text = format_status_report(&cfg_path, &state_path, &fake_sched).unwrap();
     assert!(status_text.contains("Status:   WARNING"));
     assert!(status_text.contains("unrecognized format"));
-    assert!(status_text.contains("installed (every 3600s, loaded: yes)"));
+    assert!(status_text.contains("Schedule (Linux systemd --user):"));
+    assert!(status_text.contains("installed (every 3600s, active: yes)"));
 
     // Verify error recording updates status to ERROR
     record_run_error(&state_path, "Target 'local' path does not exist").unwrap();

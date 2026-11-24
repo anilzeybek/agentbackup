@@ -41,7 +41,7 @@ agentbackup run --dry-run   # preview without modifying files or state
 # 4. Check backup health, warnings, and background schedule status
 agentbackup status
 
-# 5. Optional: install a macOS launchd background schedule
+# 5. Optional: install a background schedule (macOS launchd / Linux systemd --user or cron)
 agentbackup schedule install --every 1h
 agentbackup schedule remove
 ```
@@ -52,7 +52,7 @@ Configuration lives at `~/.config/agentbackup/config.toml` (state at `~/.config/
 
 ```toml
 redact_secrets = true
-notify = true   # native macOS notifications on errors & schema drift warnings (max once/24h per issue)
+notify = true   # desktop alerts on errors & drift warnings (macOS osascript / Linux notify-send, max once/24h per issue)
 
 [harnesses]
 antigravity = "~/.gemini/antigravity/brain"
@@ -73,4 +73,5 @@ Each conversation is written under `<harness>/<project>/<YYYY-MM-DD>_<slug>_<sho
 - **Strict target path check:** If a target `path` does not exist on disk, `agentbackup` exits with an error instead of creating it (preventing silent writes into unmounted sync folders).
 - **Never-delete retention:** If a harness prunes old local sessions (such as Claude Code's 30-day default cleanup), previously backed-up conversations remain preserved along with their entries in the top-level `INDEX`.
 - **Blob & secret hygiene:** Tool calls, tool outputs, thinking traces, screenshots, and base64 payloads are excluded/replaced with lightweight placeholders, and common API keys/tokens/PEM keys are redacted by default.
-- **Drift alerts & health summary:** Healthy background runs stay silent; if a target disappears or a harness changes its transcript schema, `agentbackup` records the warning/error for `agentbackup status` and sends a rate-limited macOS notification.
+- **Drift alerts & health summary:** Healthy background runs stay silent; if a target disappears or a harness changes its transcript schema, `agentbackup` records the warning/error for `agentbackup status` and sends a rate-limited desktop notification (macOS `osascript` / Linux `notify-send`).
+- **Full macOS & Linux parity:** All adapters, project/Git resolution, `./install.sh`, desktop alerts, and background scheduling (`launchd` on macOS, `systemd --user` with `cron` fallback on Linux) work on both platforms.

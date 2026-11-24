@@ -367,7 +367,7 @@ pub fn notify_issues_if_needed(
         let key = format!("error:{}", err.chars().take(80).collect::<String>());
         if state.check_and_mark_notification(&key, now, NOTIFICATION_COOLDOWN_HOURS) {
             state_dirty = true;
-            notify::send_notification("Backup failed", err);
+            notify::send_notification("Backup failed", err, notify::NotifySeverity::Error);
         }
     } else if !warnings.is_empty() {
         let mut to_alert = Vec::new();
@@ -388,7 +388,11 @@ pub fn notify_issues_if_needed(
                     to_alert.len()
                 )
             };
-            notify::send_notification("Schema drift or parse warning", &body);
+            notify::send_notification(
+                "Schema drift or parse warning",
+                &body,
+                notify::NotifySeverity::Warning,
+            );
         }
     }
 
@@ -424,7 +428,7 @@ pub fn format_status_report(
             out,
             "Notify:   {}",
             if cfg.notify {
-                "enabled (macOS alerts on errors & drift warnings)"
+                "enabled (desktop alerts on errors & drift warnings)"
             } else {
                 "disabled"
             }
@@ -499,9 +503,12 @@ pub fn format_status_report(
         }
     }
 
-    writeln!(out, "\nSchedule:")?;
+    writeln!(out, "\nSchedule ({}):", sched.backend)?;
     if !sched.supported {
-        writeln!(out, "  macOS launchd scheduling is not supported on this OS.")?;
+        writeln!(
+            out,
+            "  background scheduling is supported on macOS and Linux."
+        )?;
     } else if !sched.installed {
         writeln!(
             out,
@@ -514,11 +521,13 @@ pub fn format_status_report(
             .unwrap_or_else(|| "unknown interval".to_string());
         writeln!(
             out,
-            "  Status:   installed ({}, loaded: {})",
+            "  Status:   installed ({}, active: {})",
             interval_str,
             if sched.loaded { "yes" } else { "no" }
         )?;
-        writeln!(out, "  Plist:    {}", contract_tilde(&sched.plist_path))?;
+        if let Some(ref cfg_file) = sched.config_path {
+            writeln!(out, "  Unit:     {}", contract_tilde(cfg_file))?;
+        }
         writeln!(out, "  Log:      {}", contract_tilde(&sched.log_path))?;
         if !sched.recent_log_lines.is_empty() {
             writeln!(out, "  Recent log:")?;

@@ -29,7 +29,7 @@ pub enum Commands {
     /// Show backup health summary, target checks, drift warnings, and background schedule status
     Status,
 
-    /// Manage optional macOS launchd background backup schedule
+    /// Manage optional background backup schedule (macOS launchd / Linux systemd or cron)
     Schedule {
         #[command(subcommand)]
         action: ScheduleAction,
@@ -38,13 +38,13 @@ pub enum Commands {
 
 #[derive(Debug, Subcommand)]
 pub enum ScheduleAction {
-    /// Install a macOS launchd LaunchAgent to run backups automatically
+    /// Install a background schedule to run backups automatically
     Install {
         /// Backup frequency (e.g. 30m, 1h, 6h, 1d)
         #[arg(long, default_value = "1h")]
         every: String,
     },
 
-    /// Remove the installed macOS launchd schedule
+    /// Remove the installed background schedule
     Remove,
 }
