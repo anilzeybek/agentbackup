@@ -3,7 +3,7 @@ use std::env;
 use std::fs;
 #[cfg(target_os = "linux")]
 use std::io::Write;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 #[cfg(target_os = "linux")]
 use std::process::Stdio;
@@ -58,7 +58,7 @@ pub struct ScheduleInfo {
     pub recent_log_lines: Vec<String>,
 }
 
-fn read_recent_log_lines(log: &PathBuf) -> Vec<String> {
+fn read_recent_log_lines(log: &Path) -> Vec<String> {
     if !log.is_file() {
         return Vec::new();
     }
@@ -98,7 +98,7 @@ pub fn inspect() -> ScheduleInfo {
             false
         };
 
-        return ScheduleInfo {
+        ScheduleInfo {
             backend: "macOS launchd".to_string(),
             supported: true,
             installed,
@@ -107,7 +107,7 @@ pub fn inspect() -> ScheduleInfo {
             config_path: Some(plist),
             log_path: log,
             recent_log_lines,
-        };
+        }
     }
 
     #[cfg(target_os = "linux")]
@@ -118,7 +118,12 @@ pub fn inspect() -> ScheduleInfo {
                 .ok()
                 .and_then(|txt| extract_systemd_interval(&txt));
             let loaded = Command::new("systemctl")
-                .args(["--user", "is-active", "--quiet", &format!("{}.timer", SYSTEMD_UNIT)])
+                .args([
+                    "--user",
+                    "is-active",
+                    "--quiet",
+                    &format!("{}.timer", SYSTEMD_UNIT),
+                ])
                 .status()
                 .map(|s| s.success())
                 .unwrap_or(false);
@@ -154,7 +159,7 @@ pub fn inspect() -> ScheduleInfo {
         } else {
             "Linux cron"
         };
-        return ScheduleInfo {
+        ScheduleInfo {
             backend: backend.to_string(),
             supported: true,
             installed: false,
@@ -163,7 +168,7 @@ pub fn inspect() -> ScheduleInfo {
             config_path: Some(timer),
             log_path: log,
             recent_log_lines,
-        };
+        }
     }
 
     #[cfg(not(any(target_os = "macos", target_os = "linux")))]
@@ -286,7 +291,7 @@ pub fn cron_expr_from_seconds(seconds: u64) -> String {
     let mins = (seconds / 60).max(1);
     if mins < 60 {
         format!("*/{} * * * *", mins)
-    } else if mins % 1440 == 0 {
+    } else if mins.is_multiple_of(1440) {
         let days = (mins / 1440).clamp(1, 31);
         format!("0 0 */{} * *", days)
     } else {
@@ -315,12 +320,12 @@ pub fn install(every: &str) -> Result<()> {
 
     #[cfg(target_os = "macos")]
     {
-        return install_macos(&exe, &log, every, seconds);
+        install_macos(&exe, &log, every, seconds)
     }
 
     #[cfg(target_os = "linux")]
     {
-        return install_linux(&exe, &log, every, seconds);
+        install_linux(&exe, &log, every, seconds)
     }
 
     #[cfg(not(any(target_os = "macos", target_os = "linux")))]
@@ -333,12 +338,12 @@ pub fn install(every: &str) -> Result<()> {
 pub fn remove() -> Result<()> {
     #[cfg(target_os = "macos")]
     {
-        return remove_macos();
+        remove_macos()
     }
 
     #[cfg(target_os = "linux")]
     {
-        return remove_linux();
+        remove_linux()
     }
 
     #[cfg(not(any(target_os = "macos", target_os = "linux")))]
@@ -348,7 +353,7 @@ pub fn remove() -> Result<()> {
 }
 
 #[cfg(target_os = "macos")]
-fn install_macos(exe: &PathBuf, log: &PathBuf, every: &str, seconds: u64) -> Result<()> {
+fn install_macos(exe: &Path, log: &Path, every: &str, seconds: u64) -> Result<()> {
     let plist = plist_path();
     if let Some(parent) = plist.parent() {
         fs::create_dir_all(parent)
@@ -359,7 +364,11 @@ fn install_macos(exe: &PathBuf, log: &PathBuf, every: &str, seconds: u64) -> Res
         let _ = unload_launchd(&plist);
     }
 
-    let xml = build_plist_xml(&exe.display().to_string(), &log.display().to_string(), seconds);
+    let xml = build_plist_xml(
+        &exe.display().to_string(),
+        &log.display().to_string(),
+        seconds,
+    );
     fs::write(&plist, xml)
         .with_context(|| format!("Failed to write LaunchAgent plist to {}", plist.display()))?;
 
@@ -404,7 +413,7 @@ fn current_uid() -> Option<String> {
 }
 
 #[cfg(target_os = "macos")]
-fn load_launchd(plist: &PathBuf) -> Result<()> {
+fn load_launchd(plist: &Path) -> Result<()> {
     if let Some(uid) = current_uid() {
         let domain = format!("gui/{}", uid);
         let status = Command::new("launchctl")
@@ -430,7 +439,7 @@ fn load_launchd(plist: &PathBuf) -> Result<()> {
 }
 
 #[cfg(target_os = "macos")]
-fn unload_launchd(plist: &PathBuf) -> Result<()> {
+fn unload_launchd(plist: &Path) -> Result<()> {
     if let Some(uid) = current_uid() {
         let domain = format!("gui/{}", uid);
         let status = Command::new("launchctl")
@@ -463,11 +472,10 @@ fn systemd_user_available() -> bool {
 }
 
 #[cfg(target_os = "linux")]
-fn install_linux(exe: &PathBuf, log: &PathBuf, every: &str, seconds: u64) -> Result<()> {
+fn install_linux(exe: &Path, log: &Path, every: &str, seconds: u64) -> Result<()> {
     if systemd_user_available() {
         let dir = systemd_user_dir();
-        fs::create_dir_all(&dir)
-            .with_context(|| format!("Failed to create {}", dir.display()))?;
+        fs::create_dir_all(&dir).with_context(|| format!("Failed to create {}", dir.display()))?;
 
         let service_path = systemd_service_path();
         let timer_path = systemd_timer_path();
@@ -511,7 +519,11 @@ fn install_linux(exe: &PathBuf, log: &PathBuf, every: &str, seconds: u64) -> Res
     }
 
     // Fallback to user crontab when systemd --user is not active (e.g. WSL / minimal distros)
-    let line = build_cron_line(&exe.display().to_string(), &log.display().to_string(), seconds);
+    let line = build_cron_line(
+        &exe.display().to_string(),
+        &log.display().to_string(),
+        seconds,
+    );
     install_cron_entry(&line)?;
     println!("Installed Linux cron schedule (systemd --user not active; using crontab)");
     println!("  Interval: every {} ({}s)", every, seconds);

@@ -1,0 +1,74 @@
+name: Release-plz
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: release-plz-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release-plz-release:
+    name: Release tag & GitHub Release
+    runs-on: ubuntu-latest
+    outputs:
+      releases_created: ${{ steps.release.outputs.releases_created }}
+      tag: ${{ steps.extract-tag.outputs.tag }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Run release-plz release
+        id: release
+        uses: release-plz/action@v0.5
+        with:
+          command: release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract release tag
+        id: extract-tag
+        if: steps.release.outputs.releases_created == 'true'
+        env:
+          RELEASES_JSON: ${{ steps.release.outputs.releases }}
+        run: |
+          TAG=$(python3 -c 'import json, os; data = json.loads(os.environ["RELEASES_JSON"]); r = data[0] if data else {}; v = r.get("version", ""); print(r.get("tag") or (f"v{v}" if v else ""))')
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+  release-plz-pr:
+    name: Open / update Release PR
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Run release-plz release-pr
+        uses: release-plz/action@v0.5
+        with:
+          command: release-pr
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  build-and-publish:
+    name: Build binaries & update Homebrew
+    needs: release-plz-release
+    if: needs.release-plz-release.outputs.releases_created == 'true' && needs.release-plz-release.outputs.tag != ''
+    uses: ./.github/workflows/release.yml
+    with:
+      tag: ${{ needs.release-plz-release.outputs.tag }}
+    secrets: inherit

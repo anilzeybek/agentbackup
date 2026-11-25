@@ -134,7 +134,12 @@ impl Conversation {
         let mut ordered_models = Vec::new();
 
         for msg in &self.messages {
-            if let Some(m) = msg.model.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+            if let Some(m) = msg
+                .model
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+            {
                 if seen.insert(m.to_string()) {
                     ordered_models.push(m.to_string());
                 }
@@ -184,6 +189,7 @@ pub fn push_unique_model(models: &mut Vec<String>, candidate: &str) {
 /// from unrecognized schemas so `agentbackup` can warn on harness format drift
 /// without false positives.
 #[derive(Debug, Clone)]
+#[allow(clippy::large_enum_variant)]
 pub enum ParseOutcome {
     Conversation(Conversation),
     Skipped,

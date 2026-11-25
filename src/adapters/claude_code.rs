@@ -219,7 +219,10 @@ impl HarnessAdapter for ClaudeCodeAdapter {
                     };
                     update_timestamps(&mut created_at, &mut updated_at, ts);
 
-                    let msg_id = msg.get("id").and_then(|v| v.as_str()).map(|s| s.to_string());
+                    let msg_id = msg
+                        .get("id")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string());
                     if msg_id.is_some()
                         && msg_id == last_assistant_msg_id
                         && matches!(messages.last(), Some(m) if m.role == Role::Assistant)

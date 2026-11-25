@@ -110,6 +110,7 @@ struct ParsedConversation {
     content_sha256: String,
 }
 
+#[allow(clippy::large_enum_variant)]
 enum ParseJobResult {
     Parsed(ParsedConversation),
     Skipped,
@@ -495,7 +496,13 @@ pub fn format_status_report(
         if !by_harness.is_empty() {
             let parts: Vec<String> = Harness::all()
                 .iter()
-                .map(|h| format!("{}: {}", h.as_str(), by_harness.get(h).copied().unwrap_or(0)))
+                .map(|h| {
+                    format!(
+                        "{}: {}",
+                        h.as_str(),
+                        by_harness.get(h).copied().unwrap_or(0)
+                    )
+                })
                 .collect();
             writeln!(out, "  Tracked:  {}", parts.join(", "))?;
         }
@@ -561,10 +568,7 @@ pub fn init_config_interactive<R: BufRead, W: Write>(
 
     // 1. Prompt for existing local backup directory (strictly must exist)
     let target_path = loop {
-        write!(
-            writer,
-            "Local backup directory path (must already exist): "
-        )?;
+        write!(writer, "Local backup directory path (must already exist): ")?;
         writer.flush()?;
         let mut line = String::new();
         let n = reader.read_line(&mut line)?;
@@ -598,7 +602,10 @@ pub fn init_config_interactive<R: BufRead, W: Write>(
 
     // 2. Prompt for export format
     let format = loop {
-        write!(writer, "Export format [markdown/txt/json] (default: markdown): ")?;
+        write!(
+            writer,
+            "Export format [markdown/txt/json] (default: markdown): "
+        )?;
         writer.flush()?;
         let mut line = String::new();
         let n = reader.read_line(&mut line)?;

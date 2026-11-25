@@ -61,9 +61,8 @@ impl HarnessAdapter for CodexAdapter {
     }
 
     fn parse(&self, source: &DiscoveredSource) -> Result<ParseOutcome> {
-        let file = File::open(&source.path).with_context(|| {
-            format!("Failed to open Codex session {}", source.path.display())
-        })?;
+        let file = File::open(&source.path)
+            .with_context(|| format!("Failed to open Codex session {}", source.path.display()))?;
 
         let is_zst = source
             .path
@@ -86,10 +85,7 @@ impl HarnessAdapter for CodexAdapter {
     }
 }
 
-fn parse_codex_reader<R: BufRead>(
-    reader: R,
-    source: &DiscoveredSource,
-) -> Result<ParseOutcome> {
+fn parse_codex_reader<R: BufRead>(reader: R, source: &DiscoveredSource) -> Result<ParseOutcome> {
     let mut response_messages: Vec<Message> = Vec::new();
     let mut event_messages: Vec<Message> = Vec::new();
     let mut models: Vec<String> = Vec::new();
@@ -290,7 +286,7 @@ fn parse_codex_reader<R: BufRead>(
                 };
                 if let Some(text) = payload.get("message").and_then(|v| v.as_str()) {
                     let t = text.trim();
-                    if !t.is_empty() && !(role == Role::User && is_codex_injected_context(t)) {
+                    if !t.is_empty() && (role != Role::User || !is_codex_injected_context(t)) {
                         let msg_model = if role == Role::Assistant {
                             let resolved = payload
                                 .get("model")

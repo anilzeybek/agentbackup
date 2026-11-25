@@ -100,6 +100,7 @@ fn open_sqlite_readonly(db_path: &Path) -> Result<(Connection, Option<TempDir>)>
     Ok((conn, Some(tmp_dir)))
 }
 
+#[allow(clippy::let_and_return)]
 fn table_has_column(conn: &Connection, table: &str, column: &str) -> bool {
     let sql = format!("PRAGMA table_info({})", table);
     let Ok(mut stmt) = conn.prepare(&sql) else {
@@ -261,16 +262,17 @@ fn parse_sqlite_session(
         None
     };
 
-    if workspace.is_none() && !project_id.trim().is_empty() {
-        if table_has_column(&conn, "project", "worktree") {
-            if let Ok(wt) = conn.query_row(
-                "SELECT worktree FROM project WHERE id = ?1",
-                [&project_id],
-                |r| r.get::<_, String>(0),
-            ) {
-                if !wt.trim().is_empty() && wt != "/" {
-                    workspace = Some(wt);
-                }
+    if workspace.is_none()
+        && !project_id.trim().is_empty()
+        && table_has_column(&conn, "project", "worktree")
+    {
+        if let Ok(wt) = conn.query_row(
+            "SELECT worktree FROM project WHERE id = ?1",
+            [&project_id],
+            |r| r.get::<_, String>(0),
+        ) {
+            if !wt.trim().is_empty() && wt != "/" {
+                workspace = Some(wt);
             }
         }
     }
@@ -529,10 +531,7 @@ fn discover_legacy_sessions(
     Ok(sources)
 }
 
-fn parse_legacy_session(
-    session_file: &Path,
-    source: &DiscoveredSource,
-) -> Result<ParseOutcome> {
+fn parse_legacy_session(session_file: &Path, source: &DiscoveredSource) -> Result<ParseOutcome> {
     let storage_dir = session_file
         .parent()
         .and_then(|p| p.parent())

@@ -17,11 +17,19 @@ All harness adapters are strictly **read-only**.
 
 ## Install
 
+### Homebrew (macOS & Linux)
+
 ```bash
-./install.sh
+brew install anilzeybek/tap/agentbackup
 ```
 
-Installs the release binary to `~/.local/bin/agentbackup` (override with `INSTALL_DIR=/usr/local/bin ./install.sh`). Or install directly via Cargo:
+Upgrade later with `brew upgrade agentbackup`.
+
+### Prebuilt Binaries
+
+Download the latest archive for macOS (`aarch64` / `x86_64`) or Linux (`x86_64` / `aarch64`) from [GitHub Releases](https://github.com/anilzeybek/agentbackup/releases).
+
+### From Source (Rust)
 
 ```bash
 cargo install --path .
@@ -84,4 +92,4 @@ Each conversation is written under `<harness>/<project>/<YYYY-MM-DD>_<slug>_<sho
 - **Never-delete retention:** If a harness prunes old local sessions (such as Claude Code's 30-day default cleanup), previously backed-up conversations remain preserved along with their entries in the top-level `INDEX`.
 - **Blob & secret hygiene:** Tool calls, tool outputs, thinking traces, screenshots, and base64 payloads are excluded/replaced with lightweight placeholders, and common API keys/tokens/PEM keys are redacted by default.
 - **Drift alerts & health summary:** Healthy background runs stay silent; if a target disappears or a harness changes its transcript schema, `agentbackup` records the warning/error for `agentbackup status` and sends a rate-limited desktop notification (macOS `osascript` / Linux `notify-send`).
-- **Full macOS & Linux parity:** All adapters, project/Git resolution, `./install.sh`, desktop alerts, and background scheduling (`launchd` on macOS, `systemd --user` with `cron` fallback on Linux) work on both platforms.
+- **Full macOS & Linux parity:** All adapters, project/Git resolution, Homebrew/prebuilt releases, desktop alerts, and background scheduling (`launchd` on macOS, `systemd --user` with `cron` fallback on Linux) work on both platforms.

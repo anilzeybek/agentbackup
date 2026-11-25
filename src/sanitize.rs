@@ -368,8 +368,7 @@ pub fn git_repo_name_for_path(path: &std::path::Path) -> Option<String> {
                         cur.join(raw_gitdir)
                     };
                     // Worktree pointer: `<repo>/.git/worktrees/<name>` -> `<repo>`
-                    let components: Vec<&std::ffi::OsStr> =
-                        gitdir_path.iter().collect();
+                    let components: Vec<&std::ffi::OsStr> = gitdir_path.iter().collect();
                     if let Some(git_idx) = components.iter().position(|c| *c == ".git") {
                         if git_idx > 0 {
                             let repo_name = components[git_idx - 1].to_string_lossy();
@@ -507,7 +506,10 @@ mod tests {
         let google = format!("{}{}", "AIza", "SyA12345678901234567890123456789012");
         let github = format!("{}{}", "ghp_", "123456789012345678901234567890123456");
         let aws = format!("{}{}", "AKIA", "IOSFODNN7EXAMPLE");
-        let bearer = format!("{}{}", "Bearer ", "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.abc");
+        let bearer = format!(
+            "{}{}",
+            "Bearer ", "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.abc"
+        );
 
         let input = format!(
             "keys: {} {} {} {} {} Authorization: {}",
@@ -546,7 +548,10 @@ mod tests {
             ),
             None
         );
-        assert_eq!(project_name_from_path("/Users/tester/.claude/projects"), None);
+        assert_eq!(
+            project_name_from_path("/Users/tester/.claude/projects"),
+            None
+        );
         assert_eq!(project_name_from_path("/tmp"), None);
         assert_eq!(project_name_from_path("/tmp/scratch-session"), None);
         assert_eq!(project_name_from_path("/private/tmp/scratch-session"), None);

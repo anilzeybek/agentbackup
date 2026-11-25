@@ -34,8 +34,8 @@ fn main() -> Result<()> {
             let summaries = scan_harnesses(&cfg)?;
 
             println!(
-                "{:<12} {:>8} {:>10} {:>12}   {}",
-                "Harness", "Sessions", "Raw Size", "Est. Export", "Source"
+                "{:<12} {:>8} {:>10} {:>12}   Source",
+                "Harness", "Sessions", "Raw Size", "Est. Export"
             );
             println!("{}", "-".repeat(78));
 

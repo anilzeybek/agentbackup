@@ -180,7 +180,11 @@ fn setup_claude_code_fixture(root: &Path) {
         content.push_str(&line.to_string());
         content.push('\n');
     }
-    fs::write(proj_dir.join("91fc02ab-1234-5678-9abc-def012345678.jsonl"), content).unwrap();
+    fs::write(
+        proj_dir.join("91fc02ab-1234-5678-9abc-def012345678.jsonl"),
+        content,
+    )
+    .unwrap();
 
     fs::write(
         proj_dir.join("agent-sub123.jsonl"),
@@ -310,9 +314,10 @@ fn setup_codex_fixtures(root: &Path) {
         zst_raw.push_str(&line.to_string());
         zst_raw.push('\n');
     }
-    let zst_file = fs::File::create(
-        day_dir.join(format!("rollout-2026-11-23T12-00-00-{}.jsonl.zst", zst_uuid)),
-    )
+    let zst_file = fs::File::create(day_dir.join(format!(
+        "rollout-2026-11-23T12-00-00-{}.jsonl.zst",
+        zst_uuid
+    )))
     .unwrap();
     let mut encoder = zstd::stream::write::Encoder::new(zst_file, 3).unwrap();
     encoder.write_all(zst_raw.as_bytes()).unwrap();
@@ -1273,14 +1278,6 @@ fn detects_schema_drift_records_status_and_rate_limits_notifications() {
     let mut st = BackupState::load_or_default(&state_path).unwrap();
     let t0 = Utc::now();
     assert!(st.check_and_mark_notification("warning:antigravity", t0, 24));
-    assert!(!st.check_and_mark_notification(
-        "warning:antigravity",
-        t0 + Duration::hours(2),
-        24
-    ));
-    assert!(st.check_and_mark_notification(
-        "warning:antigravity",
-        t0 + Duration::hours(25),
-        24
-    ));
+    assert!(!st.check_and_mark_notification("warning:antigravity", t0 + Duration::hours(2), 24));
+    assert!(st.check_and_mark_notification("warning:antigravity", t0 + Duration::hours(25), 24));
 }

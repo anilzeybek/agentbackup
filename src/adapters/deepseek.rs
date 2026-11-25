@@ -43,9 +43,7 @@ impl HarnessAdapter for DeepSeekAdapter {
 
             // If scanning `$DSH_HOME` (which may hold profiles/plugins/etc.), only pick session
             // logs under a `sessions` directory or files named `session*.jsonl*`.
-            let in_sessions_dir = path
-                .components()
-                .any(|c| c.as_os_str() == "sessions");
+            let in_sessions_dir = path.components().any(|c| c.as_os_str() == "sessions");
             if !in_sessions_dir && !file_name.starts_with("session") {
                 continue;
             }
@@ -104,10 +102,7 @@ struct PendingChunk {
     model: Option<String>,
 }
 
-fn parse_dsh_reader<R: BufRead>(
-    reader: R,
-    source: &DiscoveredSource,
-) -> Result<ParseOutcome> {
+fn parse_dsh_reader<R: BufRead>(reader: R, source: &DiscoveredSource) -> Result<ParseOutcome> {
     let mut messages: Vec<Message> = Vec::new();
     let mut pending_chunk: Option<PendingChunk> = None;
     let mut saw_complete_assistant_in_turn = false;
@@ -124,21 +119,20 @@ fn parse_dsh_reader<R: BufRead>(
     let mut json_lines = 0usize;
     let mut recognized_events = 0usize;
 
-    let flush_chunk = |pending: &mut Option<PendingChunk>,
-                       msgs: &mut Vec<Message>,
-                       saw_complete: bool| {
-        if let Some(chunk) = pending.take() {
-            let text = chunk.text.trim().to_string();
-            if !saw_complete && !text.is_empty() {
-                msgs.push(Message {
-                    role: Role::Assistant,
-                    content: text,
-                    timestamp: chunk.timestamp,
-                    model: chunk.model,
-                });
+    let flush_chunk =
+        |pending: &mut Option<PendingChunk>, msgs: &mut Vec<Message>, saw_complete: bool| {
+            if let Some(chunk) = pending.take() {
+                let text = chunk.text.trim().to_string();
+                if !saw_complete && !text.is_empty() {
+                    msgs.push(Message {
+                        role: Role::Assistant,
+                        content: text,
+                        timestamp: chunk.timestamp,
+                        model: chunk.model,
+                    });
+                }
             }
-        }
-    };
+        };
 
     for (line_idx, line) in reader.lines().enumerate() {
         let line = match line {
@@ -242,7 +236,11 @@ fn parse_dsh_reader<R: BufRead>(
             }
             "user/message" => {
                 recognized_events += 1;
-                flush_chunk(&mut pending_chunk, &mut messages, saw_complete_assistant_in_turn);
+                flush_chunk(
+                    &mut pending_chunk,
+                    &mut messages,
+                    saw_complete_assistant_in_turn,
+                );
                 saw_complete_assistant_in_turn = false;
 
                 // Skip non-human injected user/message sources (e.g. system/subagent)
@@ -336,18 +334,15 @@ fn parse_dsh_reader<R: BufRead>(
             }
             "turn/end" => {
                 recognized_events += 1;
-                flush_chunk(&mut pending_chunk, &mut messages, saw_complete_assistant_in_turn);
+                flush_chunk(
+                    &mut pending_chunk,
+                    &mut messages,
+                    saw_complete_assistant_in_turn,
+                );
                 saw_complete_assistant_in_turn = false;
             }
-            "turn/start"
-            | "system/message"
-            | "tool/call"
-            | "tool/result"
-            | "assistant/attempt"
-            | "assistant/usage"
-            | "session/meta"
-            | "session/compaction"
-            | "session/checkpoint"
+            "turn/start" | "system/message" | "tool/call" | "tool/result" | "assistant/attempt"
+            | "assistant/usage" | "session/meta" | "session/compaction" | "session/checkpoint"
             | "context/update" => {
                 recognized_events += 1;
             }
@@ -355,7 +350,11 @@ fn parse_dsh_reader<R: BufRead>(
         }
     }
 
-    flush_chunk(&mut pending_chunk, &mut messages, saw_complete_assistant_in_turn);
+    flush_chunk(
+        &mut pending_chunk,
+        &mut messages,
+        saw_complete_assistant_in_turn,
+    );
 
     if !messages.iter().any(|m| m.role == Role::User) {
         if json_lines > 0 && recognized_events == 0 {

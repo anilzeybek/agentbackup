@@ -16,9 +16,7 @@ use walkdir::WalkDir;
 
 use crate::config::{default_harness_path_string, expand_tilde};
 use crate::models::{DiscoveredSource, Harness, ParseOutcome};
-use crate::sanitize::{
-    project_name_from_path, NON_PROJECT_HOME_DIRS, WORKSPACE_CONTAINERS,
-};
+use crate::sanitize::{project_name_from_path, NON_PROJECT_HOME_DIRS, WORKSPACE_CONTAINERS};
 
 pub trait HarnessAdapter: Send + Sync {
     fn harness(&self) -> Harness;
@@ -86,8 +84,10 @@ pub fn dir_size(path: &Path) -> u64 {
 fn re_abs_path() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| {
-        Regex::new(r#"(?:/Users/[^/\s"'`<>|]+(?:/[^/\s"'`<>|]+)+|/home/[^/\s"'`<>|]+(?:/[^/\s"'`<>|]+)+)"#)
-            .unwrap()
+        Regex::new(
+            r#"(?:/Users/[^/\s"'`<>|]+(?:/[^/\s"'`<>|]+)+|/home/[^/\s"'`<>|]+(?:/[^/\s"'`<>|]+)+)"#,
+        )
+        .unwrap()
     })
 }
 
@@ -97,9 +97,9 @@ pub fn infer_project_from_text_chunks(texts: &[String]) -> Option<(String, Strin
 
     for text in texts {
         for m in re_abs_path().find_iter(text) {
-            let raw_path = m.as_str().trim_end_matches(|c: char| {
-                matches!(c, '.' | ',' | ':' | ';' | ')' | ']' | '}')
-            });
+            let raw_path = m
+                .as_str()
+                .trim_end_matches(['.', ',', ':', ';', ')', ']', '}']);
             let parts: Vec<&str> = raw_path.split('/').filter(|s| !s.is_empty()).collect();
             // Expected: ["Users" | "home", username, dir1, (dir2), ...]
             if parts.len() < 4 {
