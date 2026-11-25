@@ -47,6 +47,7 @@ jobs:
 
   release-plz-pr:
     name: Open / update Release PR
+    needs: release-plz-release
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository

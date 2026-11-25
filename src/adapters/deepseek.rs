@@ -507,15 +507,11 @@ fn extract_dsh_content(content: Option<&Value>, is_user: bool) -> Option<String>
                             }
                         }
                     }
-                    "image" | "image_url" | "input_image" => {
-                        if is_user {
-                            parts.push("[image omitted]".to_string());
-                        }
+                    "image" | "image_url" | "input_image" if is_user => {
+                        parts.push("[image omitted]".to_string());
                     }
-                    "file" | "document" | "attachment" => {
-                        if is_user {
-                            parts.push("[attachment omitted]".to_string());
-                        }
+                    "file" | "document" | "attachment" if is_user => {
+                        parts.push("[attachment omitted]".to_string());
                     }
                     // Skip reasoning, thinking, tool_call, tool_use, tool_result
                     _ => {}

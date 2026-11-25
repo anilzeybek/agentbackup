@@ -309,15 +309,11 @@ fn extract_pi_content(content: Option<&Value>, is_user: bool) -> Option<String> 
                             }
                         }
                     }
-                    "image" | "image_url" => {
-                        if is_user {
-                            parts.push("[image omitted]".to_string());
-                        }
+                    "image" | "image_url" if is_user => {
+                        parts.push("[image omitted]".to_string());
                     }
-                    "file" | "document" => {
-                        if is_user {
-                            parts.push("[attachment omitted]".to_string());
-                        }
+                    "file" | "document" if is_user => {
+                        parts.push("[attachment omitted]".to_string());
                     }
                     // Skip thinking, tool_call, toolCall, tool_use, toolResult, etc.
                     _ => {}

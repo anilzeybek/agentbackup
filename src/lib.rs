@@ -298,7 +298,7 @@ pub fn run_backup(cfg: &Config, state_path: &Path, dry_run: bool) -> Result<RunO
     for ((target, tcfg), fast_skipped) in built_targets
         .iter()
         .zip(cfg.targets.iter())
-        .zip(fast_skipped_per_target.into_iter())
+        .zip(fast_skipped_per_target)
     {
         let tstate = state.target_mut(target.name());
         let stats = target.sync(&items, fast_skipped, tstate, dry_run)?;

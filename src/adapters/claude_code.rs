@@ -348,15 +348,11 @@ fn extract_claude_content(content: Option<&Value>, is_user: bool) -> Option<Stri
                             }
                         }
                     }
-                    "image" | "image_url" => {
-                        if is_user {
-                            parts.push("[image omitted]".to_string());
-                        }
+                    "image" | "image_url" if is_user => {
+                        parts.push("[image omitted]".to_string());
                     }
-                    "document" | "file" => {
-                        if is_user {
-                            parts.push("[attachment omitted]".to_string());
-                        }
+                    "document" | "file" if is_user => {
+                        parts.push("[attachment omitted]".to_string());
                     }
                     // Explicitly skip tool_result, tool_use, server_tool_use, thinking, redacted_thinking
                     _ => {}
