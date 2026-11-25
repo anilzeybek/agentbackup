@@ -308,9 +308,61 @@ pub fn build_cron_line(exe_path: &str, log_file: &str, interval_seconds: u64) ->
     )
 }
 
+/// Prefer a stable symlink path (such as `/opt/homebrew/bin/agentbackup`) over a
+/// canonicalized versioned path (such as `/opt/homebrew/Cellar/agentbackup/0.1.0/bin/agentbackup`)
+/// when both resolve to the same executable.
+pub fn prefer_stable_exe_path(current_exe: &Path, candidates: &[PathBuf]) -> PathBuf {
+    let canon_current = fs::canonicalize(current_exe).unwrap_or_else(|_| current_exe.to_path_buf());
+    for cand in candidates {
+        if !cand.is_absolute() {
+            continue;
+        }
+        if fs::canonicalize(cand).ok().as_deref() == Some(canon_current.as_path()) {
+            return cand.clone();
+        }
+    }
+    current_exe.to_path_buf()
+}
+
+fn resolve_schedule_exe() -> Result<PathBuf> {
+    let current_exe =
+        env::current_exe().context("Failed to locate current agentbackup executable")?;
+    let mut candidates = Vec::new();
+
+    if let Some(exe_name) = current_exe.file_name() {
+        for stable_dir in [
+            "/opt/homebrew/bin",
+            "/usr/local/bin",
+            "/home/linuxbrew/.linuxbrew/bin",
+        ] {
+            candidates.push(Path::new(stable_dir).join(exe_name));
+        }
+
+        if let Some(path_var) = env::var_os("PATH") {
+            for dir in env::split_paths(&path_var) {
+                if dir.is_absolute() {
+                    candidates.push(dir.join(exe_name));
+                }
+            }
+        }
+
+        candidates.push(home_dir().join(".local").join("bin").join(exe_name));
+        candidates.push(home_dir().join(".cargo").join("bin").join(exe_name));
+    }
+
+    if let Some(arg0) = env::args_os().next() {
+        let arg0_path = PathBuf::from(arg0);
+        if arg0_path.is_absolute() {
+            candidates.push(arg0_path);
+        }
+    }
+
+    Ok(prefer_stable_exe_path(&current_exe, &candidates))
+}
+
 pub fn install(every: &str) -> Result<()> {
     let seconds = parse_interval_seconds(every)?;
-    let exe = env::current_exe().context("Failed to locate current agentbackup executable")?;
+    let exe = resolve_schedule_exe()?;
     let log = log_path();
 
     if let Some(parent) = log.parent() {
@@ -707,5 +759,40 @@ mod tests {
         assert!(cron.starts_with("0 */1 * * * "));
         assert!(cron.contains(CRON_MARKER));
         assert_eq!(extract_cron_interval_seconds(&cron), Some(3600));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn prefers_stable_symlink_over_versioned_cellar_path() {
+        use std::os::unix::fs::symlink;
+
+        let dir = tempfile::tempdir().unwrap();
+        let cellar_bin = dir.path().join("Cellar/agentbackup/0.1.0/bin/agentbackup");
+        let other_bin = dir.path().join("other/agentbackup");
+        let stable_bin = dir.path().join("bin/agentbackup");
+        let wrong_symlink = dir.path().join("wrong/agentbackup");
+
+        fs::create_dir_all(cellar_bin.parent().unwrap()).unwrap();
+        fs::create_dir_all(other_bin.parent().unwrap()).unwrap();
+        fs::create_dir_all(stable_bin.parent().unwrap()).unwrap();
+        fs::create_dir_all(wrong_symlink.parent().unwrap()).unwrap();
+
+        fs::write(&cellar_bin, b"binary-v1").unwrap();
+        fs::write(&other_bin, b"other-binary").unwrap();
+        symlink(&cellar_bin, &stable_bin).unwrap();
+        symlink(&other_bin, &wrong_symlink).unwrap();
+
+        let chosen = prefer_stable_exe_path(
+            &cellar_bin,
+            &[
+                PathBuf::from("relative/agentbackup"),
+                wrong_symlink.clone(),
+                stable_bin.clone(),
+            ],
+        );
+        assert_eq!(chosen, stable_bin);
+
+        let fallback = prefer_stable_exe_path(&cellar_bin, &[wrong_symlink]);
+        assert_eq!(fallback, cellar_bin);
     }
 }
